@@ -1,6 +1,7 @@
 // src/lib/push-client.ts
 
 export type DevicePushState =
+  | "insecure_context"
   | "unsupported"
   | "ios_needs_install"
   | "prompt"
@@ -62,6 +63,9 @@ export async function getActivePushEndpoint(): Promise<string | null> {
 
 export async function detectDevicePushState(): Promise<DevicePushState> {
   if (typeof window === "undefined") return "unsupported";
+  if (!window.isSecureContext) {
+    return "insecure_context";
+  }
   if (isIosRequiresHomeScreenInstall() && !("PushManager" in window)) {
     return "ios_needs_install";
   }
@@ -101,6 +105,15 @@ export async function subscribeDeviceToWebPush(): Promise<{
   state: DevicePushState;
   error?: string;
 }> {
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    return {
+      ok: false,
+      state: "insecure_context",
+      error:
+        "Chrome requiere HTTPS (o localhost) para activar notificaciones Web Push. Si accediste por IP con http://, abre el sitio desde tu dominio con https://.",
+    };
+  }
+
   if (isIosRequiresHomeScreenInstall() && !isWebPushSupportedInBrowser()) {
     return {
       ok: false,
@@ -115,7 +128,7 @@ export async function subscribeDeviceToWebPush(): Promise<{
       ok: false,
       state: "unsupported",
       error:
-        "Tu navegador o conexión actual no admite notificaciones Web Push.",
+        "Tu navegador actual (o modo incógnito) no admite notificaciones Web Push.",
     };
   }
 
@@ -137,7 +150,7 @@ export async function subscribeDeviceToWebPush(): Promise<{
         state: permission === "denied" ? "denied" : "prompt",
         error:
           permission === "denied"
-            ? "El permiso de notificaciones está bloqueado en tu navegador. Puedes habilitarlo desde el ícono de candado/ajustes de la barra de direcciones."
+            ? "El permiso de notificaciones está bloqueado en Chrome. Haz clic en el ícono de ajustes junto a la barra de direcciones -> Notificaciones -> Permitir."
             : "Permiso de notificaciones pospuesto.",
       };
     }
@@ -145,6 +158,8 @@ export async function subscribeDeviceToWebPush(): Promise<{
     let reg = await navigator.serviceWorker.getRegistration("/sw.js");
     if (!reg) {
       reg = await navigator.serviceWorker.register("/sw.js");
+    } else {
+      void reg.update().catch(() => {});
     }
     const readyReg = await navigator.serviceWorker.ready;
 
@@ -183,6 +198,18 @@ export async function subscribeDeviceToWebPush(): Promise<{
           saveData.error ||
           "No se pudo vincular este dispositivo a tu sesión actual.",
       };
+    }
+
+    // Show an immediate OS confirmation notification so the user verifies Chrome alerts work
+    try {
+      await readyReg.showNotification("🔔 Avisos activados", {
+        body: "Este dispositivo recibirá notificaciones ante cambios o nuevas citas.",
+        icon: "/icon/192",
+        badge: "/icon/192",
+        tag: "reservas-push-optin-confirm",
+      });
+    } catch {
+      // Ignore if OS suppresses test notification
     }
 
     return { ok: true, state: "subscribed" };

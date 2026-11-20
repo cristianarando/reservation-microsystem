@@ -1070,6 +1070,43 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                       <span>📲</span>
                       <span>{pwaInstalled ? "App Instalada ✓" : "Instalar App"}</span>
                     </button>
+                    <button
+                      type="button"
+                      disabled={pushBusy}
+                      onClick={handleToggleDevicePush}
+                      data-testid="header-client-push-btn"
+                      className={`inline-flex items-center gap-1 text-[11px] md:text-xs font-semibold px-2.5 py-1 rounded-full transition-all border shadow-2xs whitespace-nowrap ${
+                        pushState === "subscribed"
+                          ? "text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-300"
+                          : pushState === "insecure_context" || pushState === "denied"
+                          ? "text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-300"
+                          : "text-zinc-800 bg-zinc-100 hover:bg-zinc-200 border-zinc-300"
+                      } disabled:opacity-50`}
+                      title={
+                        pushState === "subscribed"
+                          ? "Notificaciones activas en este dispositivo (clic para desactivar)"
+                          : pushState === "insecure_context"
+                          ? "Las notificaciones requieren HTTPS"
+                          : "Recibe alertas en tu navegador si cambia tu cita"
+                      }
+                    >
+                      {pushState === "subscribed" ? (
+                        <Bell className="w-3 h-3 text-emerald-600 shrink-0" />
+                      ) : (
+                        <BellOff className="w-3 h-3 text-zinc-500 shrink-0" />
+                      )}
+                      <span>
+                        {pushBusy
+                          ? "Activando..."
+                          : pushState === "subscribed"
+                          ? "Avisos activos"
+                          : pushState === "insecure_context"
+                          ? "Avisos (Requiere HTTPS)"
+                          : pushState === "denied"
+                          ? "Avisos bloqueados"
+                          : "Activar avisos"}
+                      </span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1137,9 +1174,49 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                   <span>📲</span>
                   <span>{pwaInstalled ? "App Instalada ✓" : "Instalar App"}</span>
                 </button>
+                <button
+                  type="button"
+                  disabled={pushBusy}
+                  onClick={handleToggleDevicePush}
+                  className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 min-h-[34px] rounded-full transition-all border shadow-2xs whitespace-nowrap ${
+                    pushState === "subscribed"
+                      ? "text-emerald-800 bg-emerald-50 border-emerald-300"
+                      : pushState === "insecure_context" || pushState === "denied"
+                      ? "text-amber-800 bg-amber-50 border-amber-300"
+                      : "text-zinc-800 bg-zinc-100 border-zinc-300"
+                  } disabled:opacity-50`}
+                >
+                  {pushState === "subscribed" ? (
+                    <Bell className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  ) : (
+                    <BellOff className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                  )}
+                  <span>
+                    {pushBusy
+                      ? "Activando..."
+                      : pushState === "subscribed"
+                      ? "Avisos activos"
+                      : pushState === "insecure_context"
+                      ? "Requiere HTTPS"
+                      : "Activar avisos"}
+                  </span>
+                </button>
               </div>
             </div>
           </div>
+
+          {pushMessage && (
+            <div className="mt-3 p-3 rounded-2xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-800 flex items-center justify-between gap-2">
+              <span className="leading-snug">{pushMessage}</span>
+              <button
+                type="button"
+                onClick={() => setPushMessage(null)}
+                className="text-zinc-400 hover:text-zinc-700 font-bold shrink-0 px-1"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Segmented Control in Pill (High Contrast WCAG AA) */}
           <div className="mt-4 md:mt-6 bg-zinc-200 p-1 rounded-full flex items-center border border-zinc-300/60 max-w-md mx-auto">
@@ -2403,49 +2480,51 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
               </div>
 
               {/* Web Push opt-in after booking confirmation */}
-              {pushState !== "unsupported" && (
-                <div className="mt-4 w-full max-w-md rounded-[22px] p-3.5 bg-zinc-50 border border-zinc-200 text-left text-xs space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Bell className="w-4 h-4 text-[#1F1F23] shrink-0" />
-                      <span className="font-bold text-zinc-900">
-                        {pushState === "subscribed"
-                          ? "Avisos activados en este dispositivo"
-                          : "Avísame si cambia mi cita"}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={pushBusy || pushState === "denied"}
-                      onClick={handleToggleDevicePush}
-                      data-testid="client-push-toggle-btn"
-                      className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all shrink-0 ${
-                        pushState === "subscribed"
-                          ? "bg-zinc-200 text-zinc-800 hover:bg-zinc-300"
-                          : "bg-[#1F1F23] text-white hover:bg-black"
-                      } disabled:opacity-50`}
-                    >
-                      {pushBusy
-                        ? "Procesando..."
-                        : pushState === "subscribed"
-                        ? "Desactivar"
-                        : "Activar avisos"}
-                    </button>
+              <div className="mt-4 w-full max-w-md rounded-[22px] p-3.5 bg-zinc-50 border border-zinc-200 text-left text-xs space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Bell className="w-4 h-4 text-[#1F1F23] shrink-0" />
+                    <span className="font-bold text-zinc-900">
+                      {pushState === "subscribed"
+                        ? "Avisos activados en este dispositivo"
+                        : "Avísame si cambia mi cita"}
+                    </span>
                   </div>
-                  <p className="text-[11px] text-zinc-500 leading-snug">
-                    {pushState === "ios_needs_install"
-                      ? "En iPhone/iPad: pulsa Compartir -> Agregar a Pantalla de Inicio para recibir notificaciones aunque cierres Safari."
-                      : pushState === "denied"
-                      ? "El permiso de notificaciones está bloqueado en tu navegador. Habilítalo en los ajustes del sitio si deseas recibir alertas."
-                      : "Recibe un aviso discreto en tu dispositivo si el establecimiento reprograma o cancela tu turno."}
-                  </p>
-                  {pushMessage && (
-                    <p className="text-[11px] font-semibold text-emerald-700">
-                      {pushMessage}
-                    </p>
-                  )}
+                  <button
+                    type="button"
+                    disabled={pushBusy}
+                    onClick={handleToggleDevicePush}
+                    data-testid="client-push-toggle-btn"
+                    className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all shrink-0 ${
+                      pushState === "subscribed"
+                        ? "bg-zinc-200 text-zinc-800 hover:bg-zinc-300"
+                        : "bg-[#1F1F23] text-white hover:bg-black"
+                    } disabled:opacity-50`}
+                  >
+                    {pushBusy
+                      ? "Procesando..."
+                      : pushState === "subscribed"
+                      ? "Desactivar"
+                      : pushState === "insecure_context"
+                      ? "Requiere HTTPS"
+                      : "Activar avisos"}
+                  </button>
                 </div>
-              )}
+                <p className="text-[11px] text-zinc-500 leading-snug">
+                  {pushState === "insecure_context"
+                    ? "Las notificaciones del navegador requieren acceder con HTTPS (ej. https://tudominio.com)."
+                    : pushState === "ios_needs_install"
+                    ? "En iPhone/iPad: pulsa Compartir -> Agregar a Pantalla de Inicio para recibir notificaciones aunque cierres Safari."
+                    : pushState === "denied"
+                    ? "El permiso de notificaciones está bloqueado en Chrome. Habilítalo desde el ícono de ajustes junto a la barra de direcciones."
+                    : "Recibe un aviso discreto en tu dispositivo si el establecimiento reprograma o cancela tu turno."}
+                </p>
+                {pushMessage && (
+                  <p className="text-[11px] font-semibold text-emerald-700">
+                    {pushMessage}
+                  </p>
+                )}
+              </div>
 
               <div className="mt-6 w-full max-w-md space-y-2.5">
                 <button
@@ -2493,15 +2572,17 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                     Tus Reservas Activas ({activeApts.length})
                   </h2>
                   <div className="flex items-center gap-2">
-                    {currentUser && pushState !== "unsupported" && (
+                    {currentUser && (
                       <button
                         type="button"
-                        disabled={pushBusy || pushState === "denied"}
+                        disabled={pushBusy}
                         onClick={handleToggleDevicePush}
                         data-testid="my-appointments-push-btn"
                         className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold border transition-all ${
                           pushState === "subscribed"
                             ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                            : pushState === "insecure_context" || pushState === "denied"
+                            ? "bg-amber-50 border-amber-200 text-amber-800"
                             : "bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200"
                         } disabled:opacity-50`}
                       >
@@ -2513,7 +2594,13 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                         ) : (
                           <>
                             <BellOff className="w-3 h-3 text-zinc-500" />
-                            <span>Avísame si cambia mi cita</span>
+                            <span>
+                              {pushState === "insecure_context"
+                                ? "Avisos (Requiere HTTPS)"
+                                : pushState === "denied"
+                                ? "Avisos bloqueados"
+                                : "Avísame si cambia mi cita"}
+                            </span>
                           </>
                         )}
                       </button>

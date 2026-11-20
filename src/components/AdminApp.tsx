@@ -1380,43 +1380,51 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap shrink-0">
-          {/* Device Web Push toggle (disabled during impersonation preview) */}
-          {pushState !== "unsupported" && (
-            <button
-              type="button"
-              disabled={pushBusy || isImpersonating || pushState === "denied"}
-              onClick={handleToggleAdminPush}
-              data-testid="admin-push-toggle-btn"
-              title={
-                isImpersonating
-                  ? "Deshabilitado durante la vista previa de otro profesional"
-                  : pushState === "subscribed"
-                  ? "Desactivar notificaciones en este dispositivo"
-                  : "Activar avisos en este dispositivo"
-              }
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all ${
-                pushState === "subscribed" && !isImpersonating
-                  ? "bg-emerald-50 border-emerald-300 text-emerald-900"
-                  : "bg-zinc-100 border-zinc-300 text-zinc-700 hover:bg-zinc-200"
-              } disabled:opacity-50`}
-            >
-              {pushState === "subscribed" && !isImpersonating ? (
-                <>
-                  <Bell className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>Avisos activos</span>
-                </>
-              ) : (
-                <>
-                  <BellOff className="w-3.5 h-3.5 text-zinc-500" />
-                  <span>
-                    {isImpersonating
-                      ? "Vista previa (sin vincular push)"
-                      : "Activar avisos en este dispositivo"}
-                  </span>
-                </>
-              )}
-            </button>
-          )}
+          {/* Device Web Push toggle (always visible so users see HTTPS/permission feedback if unavailable) */}
+          <button
+            type="button"
+            disabled={pushBusy || isImpersonating}
+            onClick={handleToggleAdminPush}
+            data-testid="admin-push-toggle-btn"
+            title={
+              isImpersonating
+                ? "Deshabilitado durante la vista previa de otro profesional"
+                : pushState === "subscribed"
+                ? "Desactivar notificaciones en este dispositivo"
+                : pushState === "insecure_context"
+                ? "Las notificaciones Web Push requieren acceder mediante HTTPS"
+                : pushState === "denied"
+                ? "Permiso bloqueado en Chrome (haz clic para ver cómo habilitarlo)"
+                : "Activar avisos en este dispositivo"
+            }
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all ${
+              pushState === "subscribed" && !isImpersonating
+                ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                : pushState === "insecure_context" || pushState === "denied"
+                ? "bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100"
+                : "bg-zinc-100 border-zinc-300 text-zinc-700 hover:bg-zinc-200"
+            } disabled:opacity-50`}
+          >
+            {pushState === "subscribed" && !isImpersonating ? (
+              <>
+                <Bell className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Avisos activos</span>
+              </>
+            ) : (
+              <>
+                <BellOff className="w-3.5 h-3.5 text-zinc-500" />
+                <span>
+                  {isImpersonating
+                    ? "Vista previa (sin vincular push)"
+                    : pushState === "insecure_context"
+                    ? "Avisos (Requiere HTTPS)"
+                    : pushState === "denied"
+                    ? "Avisos bloqueados"
+                    : "Activar avisos en este dispositivo"}
+                </span>
+              </>
+            )}
+          </button>
 
           {/* Admin preference: Own agenda alerts vs all team alerts */}
           {isOwnerAdmin && (

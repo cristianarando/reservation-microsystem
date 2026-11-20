@@ -99,15 +99,21 @@ export default async function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js').then(function() {
+                var registerSw = function() {
+                  navigator.serviceWorker.register('/sw.js').then(function(reg) {
                     window.__swRegistered = true;
                     window.__swRegistrationError = null;
+                    if (reg && reg.update) { reg.update().catch(function() {}); }
                   }).catch(function(err) {
                     window.__swRegistered = false;
                     window.__swRegistrationError = err && err.message ? err.message : 'No se pudo iniciar el Service Worker';
                   });
-                });
+                };
+                if (document.readyState === 'complete') {
+                  registerSw();
+                } else {
+                  window.addEventListener('load', registerSw);
+                }
               }
             `,
           }}
