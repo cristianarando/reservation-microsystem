@@ -100,7 +100,13 @@ export default async function RootLayout({
             __html: `
               if ('serviceWorker' in navigator) {
                 window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js').catch(function() {});
+                  navigator.serviceWorker.register('/sw.js').then(function() {
+                    window.__swRegistered = true;
+                    window.__swRegistrationError = null;
+                  }).catch(function(err) {
+                    window.__swRegistered = false;
+                    window.__swRegistrationError = err && err.message ? err.message : 'No se pudo iniciar el Service Worker';
+                  });
                 });
               }
             `,

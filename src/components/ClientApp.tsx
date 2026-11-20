@@ -19,6 +19,8 @@ import {
   X,
   CalendarOff,
   FileText,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { WhatsAppIcon } from "./WhatsAppIcon";
 import { ClientFooter } from "./client/ClientFooter";
@@ -40,6 +42,14 @@ import {
   getStaffWindowTimeOffs,
   isTimeOffOnDate,
 } from "@/lib/timeoff-utils";
+import {
+  closeDisplayedAccountNotifications,
+  detectDevicePushState,
+  DevicePushState,
+  getActivePushEndpoint,
+  subscribeDeviceToWebPush,
+  unsubscribeDeviceFromWebPush,
+} from "@/lib/push-client";
 
 interface ClientAppProps {
   initialData: any;
@@ -141,13 +151,34 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     );
   };
 
+  const [notifError, setNotifError] = useState<string | null>(null);
+  const [highlightedAppointmentId, setHighlightedAppointmentId] = useState<string | null>(null);
+  const pendingDeepLinkRef = useRef<{ tab?: "book" | "my-appointments"; appointmentId?: string | null } | null>(null);
+
+  const [pushState, setPushState] = useState<DevicePushState>("prompt");
+  const [pushBusy, setPushBusy] = useState<boolean>(false);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
+
   const handleDismissNotification = async (notifId: string, aptId?: string) => {
-    setDismissedNotifIds((prev) => [...prev, notifId, ...(aptId ? [aptId] : [])]);
+    const addedIds = [notifId, ...(aptId ? [aptId] : [])];
+    setDismissedNotifIds((prev) => Array.from(new Set([...prev, ...addedIds])));
+    setNotifError(null);
     try {
-      await fetch(`/api/notifications/${notifId}/read`, { method: "POST" });
+      const res = await fetch(`/api/notifications/${notifId}/read`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        throw new Error("No se pudo confirmar la lectura del aviso en el servidor.");
+      }
       if (onRefresh) onRefresh();
-    } catch (e) {
-      console.error("Error dismissing notification:", e);
+    } catch (e: unknown) {
+      // Rollback optimistic hide if network or HTTP request fails
+      setDismissedNotifIds((prev) => prev.filter((id) => !addedIds.includes(id)));
+      setNotifError(
+        e instanceof Error
+          ? e.message
+          : "No se pudo descartar el aviso. Verifica tu conexión."
+      );
     }
   };
 
@@ -293,12 +324,102 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
 
   const handleLogout = async () => {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      const endpoint = await getActivePushEndpoint();
+      await closeDisplayedAccountNotifications();
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint }),
+      });
+      setPushState("unsubscribed");
+      setPushMessage(null);
       onRefresh();
     } catch (e) {
       console.error(e);
     }
   };
+
+  const handleToggleDevicePush = async () => {
+    if (!currentUser) {
+      setShowAuthModal(true);
+      return;
+    }
+    setPushBusy(true);
+    setPushMessage(null);
+    try {
+      if (pushState === "subscribed") {
+        const res = await unsubscribeDeviceFromWebPush();
+        setPushState(res.state);
+        setPushMessage("Avisos desactivados en este dispositivo.");
+      } else {
+        const res = await subscribeDeviceToWebPush();
+        setPushState(res.state);
+        if (res.ok) {
+          setPushMessage("¡Avisos activados en este dispositivo! Te notificaremos si cambia tu cita.");
+        } else if (res.error) {
+          setPushMessage(res.error);
+        }
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  // Reconcile Web Push subscription whenever session user changes
+  useEffect(() => {
+    let active = true;
+    detectDevicePushState().then((st) => {
+      if (active) setPushState(st);
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.id]);
+
+  // Handle URL deep-linking (?tab=my-appointments&appointmentId=...) and Service Worker notificationclick messages
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const applyDeepLinkFromUrl = (rawSearch: string) => {
+      const params = new URLSearchParams(rawSearch);
+      const tabParam = params.get("tab");
+      const aptId = params.get("appointmentId");
+      if (tabParam === "my-appointments" || aptId) {
+        if (aptId) setHighlightedAppointmentId(aptId);
+        if (currentUser) {
+          setActiveTab("my-appointments");
+          pendingDeepLinkRef.current = null;
+        } else {
+          pendingDeepLinkRef.current = {
+            tab: "my-appointments",
+            appointmentId: aptId,
+          };
+          setActiveTab("my-appointments");
+          setShowAuthModal(true);
+        }
+      }
+    };
+
+    applyDeepLinkFromUrl(window.location.search);
+
+    const onSwMessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (msg && msg.type === "PUSH_NOTIFICATION_CLICK" && typeof msg.url === "string") {
+        try {
+          const parsed = new URL(msg.url, window.location.origin);
+          applyDeepLinkFromUrl(parsed.search);
+          onRefresh();
+        } catch {
+          // Ignore malformed deep link
+        }
+      }
+    };
+
+    navigator.serviceWorker?.addEventListener("message", onSwMessage);
+    return () => {
+      navigator.serviceWorker?.removeEventListener("message", onSwMessage);
+    };
+  }, [currentUser, onRefresh]);
 
   const handleAuthSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -341,6 +462,15 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
       }
       setShowAuthModal(false);
       setAuthPassword("");
+      if (pendingDeepLinkRef.current) {
+        if (pendingDeepLinkRef.current.tab) {
+          setActiveTab(pendingDeepLinkRef.current.tab);
+        }
+        if (pendingDeepLinkRef.current.appointmentId) {
+          setHighlightedAppointmentId(pendingDeepLinkRef.current.appointmentId);
+        }
+        pendingDeepLinkRef.current = null;
+      }
       onRefresh();
     } catch (err: any) {
       setAuthError(err.message || "Error al conectar con el servidor.");
@@ -666,16 +796,36 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     }
   };
 
-  const handleAcknowledgeMove = async (aptId: string) => {
+  const handleAcknowledgeMove = async (aptOrId: any) => {
+    const aptId = typeof aptOrId === "string" ? aptOrId : aptOrId?.id;
+    const targetApt =
+      typeof aptOrId === "object" && aptOrId
+        ? aptOrId
+        : userAppointments.find((a: any) => a.id === aptId);
+
+    setNotifError(null);
     try {
       const res = await fetch(`/api/appointments/${aptId}/ack-move`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedStartAt: targetApt?.startAt,
+          expectedVersion: targetApt?.rescheduleVersion,
+        }),
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setNotifError(
+          data.error ||
+            "El estado de tu cita cambió recientemente. Se actualizó tu agenda."
+        );
         onRefresh();
+        return;
       }
+      onRefresh();
     } catch (e) {
       console.error(e);
+      setNotifError("No se pudo confirmar el cambio de horario. Verifica tu conexión.");
     }
   };
 
@@ -2252,6 +2402,51 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                 )}
               </div>
 
+              {/* Web Push opt-in after booking confirmation */}
+              {pushState !== "unsupported" && (
+                <div className="mt-4 w-full max-w-md rounded-[22px] p-3.5 bg-zinc-50 border border-zinc-200 text-left text-xs space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Bell className="w-4 h-4 text-[#1F1F23] shrink-0" />
+                      <span className="font-bold text-zinc-900">
+                        {pushState === "subscribed"
+                          ? "Avisos activados en este dispositivo"
+                          : "Avísame si cambia mi cita"}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={pushBusy || pushState === "denied"}
+                      onClick={handleToggleDevicePush}
+                      data-testid="client-push-toggle-btn"
+                      className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all shrink-0 ${
+                        pushState === "subscribed"
+                          ? "bg-zinc-200 text-zinc-800 hover:bg-zinc-300"
+                          : "bg-[#1F1F23] text-white hover:bg-black"
+                      } disabled:opacity-50`}
+                    >
+                      {pushBusy
+                        ? "Procesando..."
+                        : pushState === "subscribed"
+                        ? "Desactivar"
+                        : "Activar avisos"}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 leading-snug">
+                    {pushState === "ios_needs_install"
+                      ? "En iPhone/iPad: pulsa Compartir -> Agregar a Pantalla de Inicio para recibir notificaciones aunque cierres Safari."
+                      : pushState === "denied"
+                      ? "El permiso de notificaciones está bloqueado en tu navegador. Habilítalo en los ajustes del sitio si deseas recibir alertas."
+                      : "Recibe un aviso discreto en tu dispositivo si el establecimiento reprograma o cancela tu turno."}
+                  </p>
+                  {pushMessage && (
+                    <p className="text-[11px] font-semibold text-emerald-700">
+                      {pushMessage}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="mt-6 w-full max-w-md space-y-2.5">
                 <button
                   onClick={() => {
@@ -2293,14 +2488,54 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
 
             return (
               <>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <h2 className="text-base font-bold text-[#1F1F23]">
                     Tus Reservas Activas ({activeApts.length})
                   </h2>
-                  <span className="text-xs text-zinc-400">
-                    Máx. {maxActiveAllowed} activas
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {currentUser && pushState !== "unsupported" && (
+                      <button
+                        type="button"
+                        disabled={pushBusy || pushState === "denied"}
+                        onClick={handleToggleDevicePush}
+                        data-testid="my-appointments-push-btn"
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                          pushState === "subscribed"
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                            : "bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200"
+                        } disabled:opacity-50`}
+                      >
+                        {pushState === "subscribed" ? (
+                          <>
+                            <Bell className="w-3 h-3 text-emerald-600" />
+                            <span>Avisos activos</span>
+                          </>
+                        ) : (
+                          <>
+                            <BellOff className="w-3 h-3 text-zinc-500" />
+                            <span>Avísame si cambia mi cita</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                    <span className="text-xs text-zinc-400">
+                      Máx. {maxActiveAllowed} activas
+                    </span>
+                  </div>
                 </div>
+
+                {pushMessage && currentUser && (
+                  <div className="p-3 rounded-2xl bg-zinc-50 border border-zinc-200 text-[11px] text-zinc-700 flex items-center justify-between gap-2">
+                    <span>{pushMessage}</span>
+                    <button
+                      type="button"
+                      onClick={() => setPushMessage(null)}
+                      className="text-zinc-400 hover:text-zinc-700 font-bold"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
 
                 {!currentUser ? (
                   <div className="py-8 px-4 text-center text-xs bg-zinc-50 rounded-3xl border border-zinc-200 space-y-2">
@@ -2348,15 +2583,17 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                       const isPast = new Date(apt.endAt || apt.startAt) <= listNow;
                       const isRescheduled =
                         apt.status === "RESCHEDULED_BY_STAFF";
+                      const isHighlighted = highlightedAppointmentId === apt.id;
 
                       return (
                         <div
                           key={apt.id}
+                          data-appointment-id={apt.id}
                           className={`p-4 rounded-[26px] border transition-all ${
                             isRescheduled
                               ? "bg-amber-50 border-amber-300"
                               : "bg-[#F4F4F6] border-zinc-200"
-                          }`}
+                          } ${isHighlighted ? "ring-2 ring-[#1F1F23] shadow-md" : ""}`}
                         >
                           <div className="flex items-center justify-between text-xs">
                             <span className="font-bold text-zinc-900 text-sm">
@@ -2421,24 +2658,35 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                           )}
 
                           {!isPast && (
-                            <div className="mt-3 pt-2.5 border-t border-zinc-200 flex items-center justify-between">
-                              {apt.canCancel ? (
-                                <button
-                                  onClick={() =>
-                                    handleCancelAppointment(apt.id)
-                                  }
-                                  className="text-xs text-red-600 font-bold hover:underline"
-                                >
-                                  {apt.isFreeCancellationBecauseOfStaff
-                                    ? "Cancelar sin penalización"
-                                    : "Cancelar cita"}
-                                </button>
-                              ) : (
-                                <span className="text-xs text-zinc-400">
-                                  No cancelable ({settings?.minCancelNoticeHours}
-                                  h mín.)
-                                </span>
-                              )}
+                            <div className="mt-3 pt-2.5 border-t border-zinc-200 flex items-center justify-between flex-wrap gap-2">
+                              <div className="flex items-center gap-3">
+                                {isRescheduled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAcknowledgeMove(apt)}
+                                    className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded-full transition-all"
+                                  >
+                                    ✓ Confirmar horario
+                                  </button>
+                                )}
+                                {apt.canCancel ? (
+                                  <button
+                                    onClick={() =>
+                                      handleCancelAppointment(apt.id)
+                                    }
+                                    className="text-xs text-red-600 font-bold hover:underline"
+                                  >
+                                    {apt.isFreeCancellationBecauseOfStaff
+                                      ? "Cancelar sin penalización"
+                                      : "Cancelar cita"}
+                                  </button>
+                                ) : (
+                                  <span className="text-xs text-zinc-400">
+                                    No cancelable ({settings?.minCancelNoticeHours}
+                                    h mín.)
+                                  </span>
+                                )}
+                              </div>
 
                               {settings?.phoneWhatsapp && (
                                 <a

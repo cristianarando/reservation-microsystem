@@ -1001,6 +1001,257 @@ async function runE2E() {
         manifestJson.icons.some((ic: any) => String(ic.src).includes("/icon/512") && ic.type === "image/png"),
       "PWA Manifest: /manifest.webmanifest includes personalized business name and 192/512 PNG icons"
     );
+
+    // 13. Audit P1/P2 & Web Push HTTP E2E Verification
+    console.log("\n--- 13. Audit P1/P2 & Web Push HTTP Endpoints Verification ---");
+
+    // 13a. P1 #2: Delayed ack-move cannot reactivate a cancelled appointment
+    const ackSlotDate = new Date(targetDate.getTime() + 24 * 3600_000);
+    ackSlotDate.setHours(12, 0, 0, 0);
+    const ackApt = await prisma.appointment.create({
+      data: {
+        customerId: createdUserId!,
+        staffId: drAlejandro.id,
+        serviceId: firstService.id,
+        startAt: ackSlotDate,
+        endAt: new Date(ackSlotDate.getTime() + 30 * 60_000),
+        status: "RESCHEDULED_BY_STAFF",
+        rescheduleVersion: 2,
+        priceSnapshot: firstService.price,
+      },
+    });
+    createdAppointmentIds.push(ackApt.id);
+
+    // Reject stale version (v1 when current is v2)
+    const staleAckRes = await customerSession.request(
+      `/api/appointments/${ackApt.id}/ack-move`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: 1 }),
+      }
+    );
+    assert(
+      staleAckRes.status === 409 && staleAckRes.json?.currentStatus === "RESCHEDULED_BY_STAFF",
+      "P1 #2 (HTTP): POST /api/appointments/[id]/ack-move rejects outdated rescheduleVersion (HTTP 409)"
+    );
+
+    // Confirm current version (v2) + verify idempotent repeat
+    const validAckRes = await customerSession.request(
+      `/api/appointments/${ackApt.id}/ack-move`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: 2 }),
+      }
+    );
+    const repeatAckRes = await customerSession.request(
+      `/api/appointments/${ackApt.id}/ack-move`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: 2 }),
+      }
+    );
+    assert(
+      validAckRes.status === 200 &&
+        validAckRes.json?.appointment?.status === "CONFIRMED" &&
+        repeatAckRes.status === 200 &&
+        repeatAckRes.json?.idempotent === true,
+      "P1 #2 (HTTP): POST /api/appointments/[id]/ack-move confirms matching version and is idempotent on repeat"
+    );
+
+    // Now cancel it via admin status route, then verify late ack-move cannot reactivate it
+    const adminCancelRes = await adminSession.request(
+      `/api/admin/appointments/${ackApt.id}/status`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ status: "CANCELLED", reason: "Cancelación de prueba P1-2" }),
+      }
+    );
+    const lateAckAfterCancel = await customerSession.request(
+      `/api/appointments/${ackApt.id}/ack-move`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: 2 }),
+      }
+    );
+    assert(
+      adminCancelRes.status === 200 &&
+        lateAckAfterCancel.status === 409 &&
+        lateAckAfterCancel.json?.currentStatus === "CANCELLED",
+      "P1 #2 (HTTP): Delayed ack-move after cancellation is rejected with HTTP 409 and never reactivates CANCELLED appointment"
+    );
+
+    // 13b. P1 #6: Invalid status transition CANCELLED -> NO_SHOW rejected with HTTP 409
+    const invalidCancelledToNoShow = await adminSession.request(
+      `/api/admin/appointments/${ackApt.id}/status`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ status: "NO_SHOW" }),
+      }
+    );
+    assert(
+      invalidCancelledToNoShow.status === 409,
+      "P1 #6 (HTTP): PUT /api/admin/appointments/[id]/status blocks direct transition from CANCELLED to NO_SHOW (HTTP 409)"
+    );
+
+    // 13c. P1 #3: Staff promotion on pre-existing local customer account rotates credentials, revokes prior session, and requires invitation verification
+    const preRegEmail = `pre.doctor.${Date.now()}@test.com`;
+    const preRegSession = new BrowserSession();
+    const preRegRes = await preRegSession.request("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Pre-Registered Customer",
+        email: preRegEmail,
+        password: "AttackerOldPassword123!",
+        phone: "+59171122334",
+      }),
+    });
+    const preRegUserId = preRegRes.json?.user?.id;
+
+    try {
+      const staffCreateRes = await adminSession.request("/api/admin/staff", {
+        method: "POST",
+        body: JSON.stringify({
+          displayName: "Dr. Invitado Verificado",
+          specialtyTitle: "Cardiología",
+          email: preRegEmail,
+          phone: "+59171122334",
+        }),
+      });
+
+      // Pre-existing customer session must be immediately invalidated (sessionVersion incremented)
+      const preRegBootAfterPromote = await preRegSession.request("/api/bootstrap");
+      // Pre-existing customer password must no longer work
+      const oldPassLogin = await anon.request("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          email: preRegEmail,
+          password: "AttackerOldPassword123!",
+        }),
+      });
+      const dbUserBeforeClaim = await prisma.user.findUnique({ where: { id: preRegUserId } });
+
+      assert(
+        staffCreateRes.status === 200 &&
+          staffCreateRes.json?.requiresVerification === true &&
+          preRegBootAfterPromote.json?.currentUser === null &&
+          oldPassLogin.status === 401 &&
+          dbUserBeforeClaim?.role === "CUSTOMER" &&
+          dbUserBeforeClaim?.pendingStaffUpgrade === true,
+        "P1 #3 (HTTP): Adding staff over existing customer email revokes prior session, rotates password, and keeps role=CUSTOMER until invitation verification"
+      );
+
+      // Claim invitation with valid inviteToken
+      const claimSession = new BrowserSession();
+      const claimRes = await claimSession.request("/api/auth/staff-invite", {
+        method: "POST",
+        body: JSON.stringify({
+          email: preRegEmail,
+          token: staffCreateRes.json.inviteToken,
+          password: "VerifiedDoctorPassword123!",
+        }),
+      });
+      assert(
+        claimRes.status === 200 && claimRes.json?.user?.role === "PROVIDER",
+        "P1 #3 (HTTP): POST /api/auth/staff-invite verifies holder token and activates PROVIDER role"
+      );
+    } finally {
+      if (preRegUserId) {
+        await prisma.pushDelivery.deleteMany({ where: { recipientUserId: preRegUserId } });
+        await prisma.pushSubscription.deleteMany({ where: { userId: preRegUserId } });
+        await prisma.staffProfile.deleteMany({ where: { userId: preRegUserId } });
+        await prisma.user.deleteMany({ where: { id: preRegUserId } });
+      }
+    }
+
+    // 13d. P2: Provider can pause and resume their own agenda via PATCH /api/admin/staff
+    const sofiaProfile = staffList.find((s: any) => s.displayName.includes("Sofía"));
+    if (sofiaProfile) {
+      const pauseRes = await providerSession.request("/api/admin/staff", {
+        method: "PATCH",
+        body: JSON.stringify({ staffId: sofiaProfile.id, isActive: false }),
+      });
+      const resumeRes = await providerSession.request("/api/admin/staff", {
+        method: "PATCH",
+        body: JSON.stringify({ staffId: sofiaProfile.id, isActive: true }),
+      });
+      assert(
+        pauseRes.status === 200 &&
+          pauseRes.json?.effectiveIsActive === false &&
+          resumeRes.status === 200 &&
+          resumeRes.json?.effectiveIsActive === true,
+        "P2 (HTTP): Provider can pause (isActive=false) and resume (isActive=true) their own agenda via PATCH /api/admin/staff"
+      );
+    }
+
+    // 13e. Web Push HTTP Endpoints & Impersonation Guard
+    const vapidKeyRes = await anon.request("/api/push/vapid-public-key");
+    assert(
+      vapidKeyRes.status === 200 &&
+        typeof vapidKeyRes.json?.publicKey === "string" &&
+        vapidKeyRes.json.publicKey.length >= 80,
+      "Web Push (HTTP): GET /api/push/vapid-public-key returns valid P-256 public key"
+    );
+
+    const { createECDH: makeEcdh, randomBytes: randBytes } = await import("node:crypto");
+    const e2eEcdh = makeEcdh("prime256v1");
+    e2eEcdh.generateKeys();
+    const e2eEndpoint = `https://fcm.googleapis.com/fcm/send/e2e-device-${Date.now()}`;
+    const e2eSubPayload = {
+      endpoint: e2eEndpoint,
+      keys: {
+        p256dh: e2eEcdh.getPublicKey().toString("base64url"),
+        auth: randBytes(16).toString("base64url"),
+      },
+    };
+
+    // Subscribe as customer
+    const subCreateRes = await customerSession.request("/api/push/subscribe", {
+      method: "POST",
+      body: JSON.stringify({ subscription: e2eSubPayload }),
+    });
+    assert(
+      subCreateRes.status === 200 && subCreateRes.json?.subscription?.status === "ACTIVE",
+      "Web Push (HTTP): POST /api/push/subscribe binds device subscription to authenticated session"
+    );
+
+    // Reconcile from a different user session on the same shared browser -> unbinds previous owner
+    const reconcileOtherUser = await providerSession.request("/api/push/reconcile", {
+      method: "POST",
+      body: JSON.stringify({ endpoint: e2eEndpoint }),
+    });
+    assert(
+      reconcileOtherUser.status === 200 &&
+        reconcileOtherUser.json?.unboundPreviousOwner === true &&
+        reconcileOtherUser.json?.boundToCurrentUser === false,
+      "Web Push Shared Device (HTTP): POST /api/push/reconcile unbinds previous user's subscription on user change"
+    );
+
+    // Impersonation ("preview as staff") blocks creating push subscription for impersonated doctor
+    const sofiaUser = await prisma.user.findUnique({ where: { email: "sofia@sonrisa.com" } });
+    if (sofiaUser) {
+      const switchToSofia = await adminSession.request("/api/auth/switch", {
+        method: "POST",
+        body: JSON.stringify({ userId: sofiaUser.id }),
+      });
+      const pushDuringPreview = await adminSession.request("/api/push/subscribe", {
+        method: "POST",
+        body: JSON.stringify({ subscription: e2eSubPayload }),
+      });
+      // Switch back to admin
+      const adminUser = await prisma.user.findUnique({ where: { email: "alejandro@sonrisa.com" } });
+      if (adminUser) {
+        await adminSession.request("/api/auth/switch", {
+          method: "POST",
+          body: JSON.stringify({ userId: adminUser.id }),
+        });
+      }
+      assert(
+        switchToSofia.status === 200 && pushDuringPreview.status === 403,
+        "Web Push Impersonation Guard (HTTP): Blocks binding admin device to impersonated provider during preview (HTTP 403)"
+      );
+    }
+
+    await prisma.pushSubscription.deleteMany({ where: { endpoint: e2eEndpoint } });
   } finally {
     // Total test data cleanup to leave database in pristine state
     if (createdAppointmentIds.length > 0) {

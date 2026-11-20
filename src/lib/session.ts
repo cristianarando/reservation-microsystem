@@ -27,17 +27,28 @@ function sign(payload: string): string {
   return createHmac("sha256", getSessionSecret()).update(payload).digest("base64url");
 }
 
+const VERSION_SEPARATOR = "\0v=";
+
 /**
- * Token format: base64url(userId).expiresAtEpochSec.signature
- * The signature covers userId + expiry, so neither can be tampered with.
+ * Token format: base64url(userId[\0v=version]).expiresAtEpochSec.signature
+ * When sessionVersion === 1, encodes plain userId for 100% backwards-compatibility.
+ * When sessionVersion > 1, embeds the version in the signed payload so any prior token is invalidated.
  */
-export function createSessionToken(userId: string, maxAgeSec = SESSION_MAX_AGE_SEC): string {
+export function createSessionToken(
+  userId: string,
+  maxAgeSec = SESSION_MAX_AGE_SEC,
+  sessionVersion = 1
+): string {
   const expiresAt = Math.floor(Date.now() / 1000) + maxAgeSec;
-  const payload = `${Buffer.from(userId).toString("base64url")}.${expiresAt}`;
+  const rawIdentity =
+    sessionVersion > 1 ? `${userId}${VERSION_SEPARATOR}${sessionVersion}` : userId;
+  const payload = `${Buffer.from(rawIdentity).toString("base64url")}.${expiresAt}`;
   return `${payload}.${sign(payload)}`;
 }
 
-export function verifySessionToken(token: string | undefined | null): string | null {
+export function verifySessionTokenWithVersion(
+  token: string | undefined | null
+): { userId: string; sessionVersion: number } | null {
   if (!token) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
@@ -57,10 +68,24 @@ export function verifySessionToken(token: string | undefined | null): string | n
   }
 
   try {
-    return Buffer.from(encodedId, "base64url").toString("utf8") || null;
+    const decoded = Buffer.from(encodedId, "base64url").toString("utf8");
+    if (!decoded) return null;
+    const sepIndex = decoded.indexOf(VERSION_SEPARATOR);
+    if (sepIndex === -1) {
+      return { userId: decoded, sessionVersion: 1 };
+    }
+    const userId = decoded.slice(0, sepIndex);
+    const ver = Number(decoded.slice(sepIndex + VERSION_SEPARATOR.length));
+    if (!userId || !Number.isInteger(ver) || ver < 1) return null;
+    return { userId, sessionVersion: ver };
   } catch {
     return null;
   }
+}
+
+export function verifySessionToken(token: string | undefined | null): string | null {
+  const parsed = verifySessionTokenWithVersion(token);
+  return parsed ? parsed.userId : null;
 }
 
 function cookieOptions(maxAge = SESSION_MAX_AGE_SEC) {
@@ -76,19 +101,41 @@ function cookieOptions(maxAge = SESSION_MAX_AGE_SEC) {
 export async function getCurrentUser() {
   try {
     const cookieStore = await cookies();
-    const userId = verifySessionToken(cookieStore.get(SESSION_COOKIE_NAME)?.value);
-    if (!userId) return null;
+    const parsed = verifySessionTokenWithVersion(
+      cookieStore.get(SESSION_COOKIE_NAME)?.value
+    );
+    if (!parsed) return null;
 
-    return await prisma.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({ where: { id: parsed.userId } });
+    if (!user) return null;
+
+    const expectedVersion = user.sessionVersion ?? 1;
+    if (parsed.sessionVersion !== expectedVersion) {
+      return null;
+    }
+
+    return user;
   } catch (error) {
     console.error("Error retrieving session user:", error);
     return null;
   }
 }
 
-export async function setSessionUserId(userId: string) {
+export async function setSessionUserId(userId: string, sessionVersion?: number) {
+  let effectiveVersion = sessionVersion;
+  if (effectiveVersion === undefined) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { sessionVersion: true },
+    });
+    effectiveVersion = user?.sessionVersion ?? 1;
+  }
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE_NAME, createSessionToken(userId), cookieOptions());
+  cookieStore.set(
+    SESSION_COOKIE_NAME,
+    createSessionToken(userId, SESSION_MAX_AGE_SEC, effectiveVersion),
+    cookieOptions()
+  );
 }
 
 export async function clearSessionUser() {

@@ -79,7 +79,7 @@ export async function POST(req: Request) {
       },
     });
 
-    await setSessionUserId(user.id);
+    await setSessionUserId(user.id, user.sessionVersion);
 
     return NextResponse.json({
       ok: true,
@@ -91,10 +91,10 @@ export async function POST(req: Request) {
         phone: user.phone,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Register error:", error);
     return NextResponse.json(
-      { error: error?.message || "Error al registrar usuario" },
+      { error: "No se pudo completar el registro. Intenta nuevamente." },
       { status: 500 }
     );
   }

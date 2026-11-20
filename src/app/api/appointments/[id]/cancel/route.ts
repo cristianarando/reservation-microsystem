@@ -9,6 +9,8 @@ import {
   verifySameOrigin,
 } from "@/lib/api-guard";
 import { emitRealtimeEvent } from "@/lib/realtime-events";
+import { cancelAppointmentInTx } from "@/lib/appointment-lifecycle";
+import { dispatchPendingPushDeliveries } from "@/lib/web-push";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,10 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: "No autenticado" }, { status: 401 });
     }
+
+    const body = await req.json().catch(() => ({}));
+    const reason =
+      typeof body?.reason === "string" ? body.reason.trim().slice(0, 300) : undefined;
 
     const appointment = await prisma.appointment.findUnique({
       where: { id },
@@ -65,36 +71,24 @@ export async function POST(
       }
     }
 
-    // Cancel appointment
-    const updated = await prisma.appointment.update({
-      where: { id },
-      data: {
-        status: "CANCELLED",
-        // If cancelled by the customer themselves, clear staffMoveReason so UI doesn't report it as cancelled by doctor
-        ...(!isStaffOrAdmin ? { staffMoveReason: null } : {}),
-      },
+    const result = await prisma.$transaction(async (tx) => {
+      return cancelAppointmentInTx(tx, {
+        appointmentId: id,
+        actorUser: user,
+        reason,
+      });
     });
 
-    // Mark any unread notifications related to this appointment as read when customer cancels it
-    if (!isStaffOrAdmin) {
-      await prisma.notification.updateMany({
-        where: {
-          userId: user.id,
-          appointmentId: id,
-          isRead: false,
-        },
-        data: { isRead: true },
-      });
+    if (result.realtimeEvent) {
+      emitRealtimeEvent(result.realtimeEvent);
+      void dispatchPendingPushDeliveries().catch(() => {});
     }
 
-    emitRealtimeEvent({
-      type: "APPOINTMENT_CANCELLED",
-      appointmentId: updated.id,
-      staffId: updated.staffId,
-      cancelledBy: isStaffOrAdmin ? "STAFF" : "CUSTOMER",
+    return NextResponse.json({
+      ok: true,
+      idempotent: result.alreadyCancelled,
+      appointment: result.appointment,
     });
-
-    return NextResponse.json({ ok: true, appointment: updated });
   } catch (error: unknown) {
     return safeErrorResponse(error, "No se pudo cancelar la cita.");
   }

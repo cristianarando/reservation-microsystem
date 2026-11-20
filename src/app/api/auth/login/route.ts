@@ -75,9 +75,25 @@ export async function POST(req: Request) {
       return registerFailure();
     }
 
+    // If the account was an existing CUSTOMER invited as staff, logging in with the newly rotated
+    // admin-issued credential (or valid inviteToken) completes the verification and activates PROVIDER role.
+    let activeUser = user;
+    if (user.pendingStaffUpgrade) {
+      activeUser = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          role: user.role === "ADMIN" ? "ADMIN" : "PROVIDER",
+          pendingStaffUpgrade: false,
+          staffInviteTokenHash: null,
+          staffInviteExpiresAt: null,
+          sessionVersion: { increment: 1 },
+        },
+      });
+    }
+
     // Role gate is evaluated only AFTER valid credentials, so it reveals nothing to attackers.
     if (role === "STAFF" || role === "ADMIN" || role === "PROVIDER") {
-      if (user.role !== "ADMIN" && user.role !== "PROVIDER") {
+      if (activeUser.role !== "ADMIN" && activeUser.role !== "PROVIDER") {
         return NextResponse.json(
           { error: "Esta cuenta no tiene permisos de profesional o administrador." },
           { status: 403 }
@@ -87,19 +103,20 @@ export async function POST(req: Request) {
 
     resetRateLimit(accountKey);
     await clearImpersonator();
-    await setSessionUserId(user.id);
+    await setSessionUserId(activeUser.id, activeUser.sessionVersion);
 
     return NextResponse.json({
       ok: true,
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        phone: user.phone,
+        id: activeUser.id,
+        name: activeUser.name,
+        email: activeUser.email,
+        role: activeUser.role,
+        phone: activeUser.phone,
+        notifyAllStaff: activeUser.notifyAllStaff,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Login error:", error);
     return NextResponse.json({ error: "Error al iniciar sesión" }, { status: 500 });
   }

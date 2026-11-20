@@ -8,6 +8,15 @@ prisma/*.db
 prisma/*.db-wal
 prisma/*.db-shm
 prisma/*.db-journal
+data
+data/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.bak
+*.backup
+backups
 tests
 *.md
 Dockerfile

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { AdminApp } from "@/components/AdminApp";
 import Link from "next/link";
 import {
@@ -13,56 +13,89 @@ import {
   EyeOff,
   KeyRound,
 } from "lucide-react";
+import {
+  closeDisplayedAccountNotifications,
+  getActivePushEndpoint,
+} from "@/lib/push-client";
 
 export default function AdminPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [emailInput, setEmailInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
+  const [inviteTokenInput, setInviteTokenInput] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const inFlightRef = useRef<Promise<void> | null>(null);
 
-  const loadData = async () => {
-    try {
-      const res = await fetch("/api/bootstrap");
-      if (!res.ok) {
-        console.error("Bootstrap HTTP status:", res.status);
-      }
-      const json = await res.json().catch(() => null);
-      if (json) {
-        setData(json);
-      }
-    } catch (e) {
-      console.error("Error loading bootstrap data:", e);
-    } finally {
-      setLoading(false);
+  const loadData = useCallback(async () => {
+    if (inFlightRef.current) {
+      return inFlightRef.current;
     }
-  };
+    const task = (async () => {
+      try {
+        const res = await fetch("/api/bootstrap", { cache: "no-store" });
+        if (!res.ok) {
+          console.error("Bootstrap HTTP status:", res.status);
+        }
+        const json = await res.json().catch(() => null);
+        if (json) {
+          setData(json);
+        }
+      } catch (e) {
+        console.error("Error loading bootstrap data:", e);
+      } finally {
+        setLoading(false);
+        inFlightRef.current = null;
+      }
+    })();
+    inFlightRef.current = task;
+    return task;
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const invite = params.get("invite");
+      const emailParam = params.get("email");
+      if (invite) setInviteTokenInput(invite);
+      if (emailParam) setEmailInput(emailParam);
+    }
+  }, [loadData]);
 
   const handleStaffLogin = async (targetEmail: string, targetPassword?: string) => {
     setLoginLoading(true);
     setLoginError(null);
     const pass = targetPassword || passwordInput;
     try {
-      const res = await fetch("/api/auth/login", {
+      const endpoint = inviteTokenInput.trim()
+        ? "/api/auth/staff-invite"
+        : "/api/auth/login";
+      const payload = inviteTokenInput.trim()
+        ? {
+            email: targetEmail.trim(),
+            token: inviteTokenInput.trim(),
+            password: pass,
+          }
+        : {
+            email: targetEmail.trim(),
+            password: pass,
+            role: "STAFF",
+          };
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: targetEmail.trim(),
-          password: pass,
-          role: "STAFF",
-        }),
+        body: JSON.stringify(payload),
       });
       const resJson = await res.json().catch(() => ({ error: "Error en la respuesta" }));
       if (!res.ok) {
         setLoginError(resJson.error || "No fue posible iniciar sesión.");
         return;
       }
+      setInviteTokenInput("");
       await loadData();
     } catch (e: any) {
       setLoginError(e.message || "Error al conectar con el servidor");
@@ -73,7 +106,13 @@ export default function AdminPage() {
 
   const handleLogout = async () => {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      const endpoint = await getActivePushEndpoint();
+      await closeDisplayedAccountNotifications();
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint }),
+      });
       await loadData();
     } catch (e) {
       console.error(e);
@@ -153,6 +192,18 @@ export default function AdminPage() {
             }}
             className="space-y-4"
           >
+            {inviteTokenInput && (
+              <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-1">
+                <div className="font-bold flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Activación de Invitación Profesional</span>
+                </div>
+                <p className="text-[11px] text-emerald-800">
+                  Define tu contraseña personal para verificar tu identidad y activar tu acceso profesional.
+                </p>
+              </div>
+            )}
+
             <div className="border border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2.5">
               <label className="text-xs text-zinc-500 block font-medium">
                 Correo Electrónico Autorizado
@@ -169,7 +220,7 @@ export default function AdminPage() {
 
               <div className="border border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2.5 relative">
                 <label className="text-xs text-zinc-500 block font-medium">
-                  Contraseña Privada
+                  {inviteTokenInput ? "Define tu Nueva Contraseña" : "Contraseña Privada"}
                 </label>
                 <div className="flex items-center justify-between">
                   <input
@@ -196,7 +247,11 @@ export default function AdminPage() {
               disabled={loginLoading || !emailInput || !passwordInput}
               className="w-full py-3.5 rounded-full bg-[#1F1F23] text-white text-xs font-bold hover:bg-black transition-all shadow-md disabled:opacity-50"
             >
-              {loginLoading ? "Verificando credenciales..." : "Ingresar al Panel"}
+              {loginLoading
+                ? "Verificando credenciales..."
+                : inviteTokenInput
+                ? "Verificar Invitación y Activar Cuenta"
+                : "Ingresar al Panel"}
             </button>
           </form>
 
@@ -244,7 +299,11 @@ export default function AdminPage() {
               <Stethoscope className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             )}
             <span className="font-semibold truncate max-w-[140px] sm:max-w-none">{currentUser.name}</span>
-            <span className="hidden sm:inline-flex bg-white/10 text-zinc-300 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
+            <span
+              data-testid="header-role-badge"
+              data-role={currentUser.role}
+              className="hidden sm:inline-flex bg-white/10 text-zinc-300 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+            >
               {currentUser.role === "ADMIN"
                 ? "Administrador"
                 : data?.settings?.staffLabel || "Especialista"}

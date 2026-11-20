@@ -27,11 +27,19 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# sqlite local db
+# sqlite local db and mounted data volumes
 prisma/*.db
 prisma/*.db-journal
 prisma/*.db-wal
 prisma/*.db-shm
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.bak
+*.backup
+/backups/
 
 certificates
 

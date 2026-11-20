@@ -1,12 +1,34 @@
 // src/app/api/events/route.ts
+import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/session";
 import {
+  filterRealtimeEventForSubscriber,
   RealtimeEventPayload,
+  RealtimeSubscriberContext,
   subscribeRealtimeEvents,
 } from "@/lib/realtime-events";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  const user = await getCurrentUser();
+  let ownStaffId: string | null = null;
+
+  if (user && (user.role === "PROVIDER" || user.role === "ADMIN")) {
+    const staffProfile = await prisma.staffProfile.findFirst({
+      where: { userId: user.id },
+      select: { id: true },
+    });
+    ownStaffId = staffProfile?.id ?? null;
+  }
+
+  const subscriberContext: RealtimeSubscriberContext = {
+    userId: user?.id ?? null,
+    role: user?.role ?? null,
+    ownStaffId,
+    notifyAllStaff: Boolean(user?.notifyAllStaff),
+  };
+
   const encoder = new TextEncoder();
 
   let cleanup: (() => void) | null = null;
@@ -14,6 +36,7 @@ export async function GET(req: Request) {
   const stream = new ReadableStream({
     start(controller) {
       let closed = false;
+      let cleanedUp = false;
 
       const safeEnqueue = (chunk: string) => {
         if (closed) return;
@@ -26,7 +49,9 @@ export async function GET(req: Request) {
       };
 
       const sendEvent = (payload: RealtimeEventPayload) => {
-        safeEnqueue(`data: ${JSON.stringify(payload)}\n\n`);
+        const filtered = filterRealtimeEventForSubscriber(payload, subscriberContext);
+        if (!filtered) return;
+        safeEnqueue(`data: ${JSON.stringify(filtered)}\n\n`);
       };
 
       sendEvent({ type: "CONNECTED", timestamp: Date.now() });
@@ -37,8 +62,9 @@ export async function GET(req: Request) {
       }, 20000);
 
       cleanup = () => {
-        if (closed) return;
         closed = true;
+        if (cleanedUp) return;
+        cleanedUp = true;
         clearInterval(keepalive);
         unsubscribe();
         try {
@@ -48,9 +74,17 @@ export async function GET(req: Request) {
         }
       };
 
-      req.signal.addEventListener("abort", () => {
-        if (cleanup) cleanup();
-      });
+      if (req.signal.aborted) {
+        cleanup();
+      } else {
+        req.signal.addEventListener(
+          "abort",
+          () => {
+            if (cleanup) cleanup();
+          },
+          { once: true }
+        );
+      }
     },
     cancel() {
       if (cleanup) cleanup();

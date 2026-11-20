@@ -77,12 +77,12 @@ export default async function PrivacidadPage() {
 
       <section className="space-y-2">
         <h2 className="text-base font-bold text-[#1F1F23]">
-          3. Finalidad y Base Legítima del Tratamiento
+          3. Finalidad, Canal Opcional de Notificaciones Web Push y Base Legítima
         </h2>
         <p>Utilizamos tus datos exclusivamente para:</p>
         <ul className="list-disc pl-5 space-y-1.5">
           <li>Gestionar la programación, visualización, confirmación y cancelación de tus citas.</li>
-          <li>Notificarte cambios de horario o imprevistos del establecimiento (dentro del portal o mediante enlace directo a WhatsApp).</li>
+          <li>Notificarte cambios de horario o imprevistos del establecimiento (dentro del portal, mediante notificaciones Web Push si las activas, o mediante enlace directo a WhatsApp).</li>
           <li>Aplicar de forma transparente las reglas de control anti-inasistencias y límites de cupos descritos en nuestros{" "}
             <Link href="/terminos#cancelaciones" className="text-[#1F1F23] font-semibold underline">
               Términos y Condiciones
@@ -91,9 +91,22 @@ export default async function PrivacidadPage() {
           <li>Autenticar tu identidad y evitar suplantaciones o accesos indebidos.</li>
         </ul>
         <p>
+          <strong>Canal opcional de Notificaciones de Navegador (Web Push):</strong> Si decides
+          activar voluntariamente la opción <em>&quot;Avísame si cambia mi cita&quot;</em> o{" "}
+          <em>&quot;Activar avisos en este dispositivo&quot;</em>, tu navegador generará una
+          suscripción técnica compuesta por un identificador de entrega HTTPS (<code>endpoint</code>)
+          y claves criptográficas públicas (<code>p256dh</code> y <code>auth</code>). Dichos datos se
+          asocian únicamente a tu sesión para enviarte avisos sobre tus citas o tu agenda. Por tu
+          privacidad, los mensajes externos en pantalla bloqueada muestran únicamente texto genérico
+          (sin exponer diagnósticos, notas clínicas ni datos personales sensibles). Al cerrar sesión
+          en un equipo o desactivar los avisos desde el portal o los ajustes del navegador, la
+          suscripción del dispositivo se desvincula automáticamente.
+        </p>
+        <p>
           La base jurídica es la ejecución de tu solicitud de reserva precontractual/contractual, el
-          consentimiento expreso otorgado al registrarte o confirmar tu cita, y el interés legítimo
-          en la seguridad e integridad de la plataforma.
+          consentimiento expreso otorgado al registrarte, confirmar tu cita o activar las
+          notificaciones por dispositivo, y el interés legítimo en la seguridad e integridad de la
+          plataforma.
         </p>
       </section>
 

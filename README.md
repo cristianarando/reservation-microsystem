@@ -31,7 +31,7 @@
 - **Intelligent Staff Auto-Assignment (`ANY`):** Load-balancing algorithm that dynamically assigns the appointment to the best available professional for the chosen time slot.
 - **Self-Service "My Appointments" Hub:** Direct view of active, rescheduled, and past bookings with an expandable **Past Appointments & Archive** drawer.
 - **Instant WhatsApp Deep-Links:** One-tap integration to `https://wa.me/` with pre-filled localized text containing appointment date, time, service name, and clinic details.
-- **Progressive Web App (PWA):** Fully installable as a native app on Android, iOS, and Desktop with `manifest.webmanifest`, app icons, and offline shell caching.
+- **Progressive Web App (PWA) & Optional Web Push:** Installable on Android, iOS 16.4+, and Desktop with `manifest.webmanifest`, network-first static shell assets (strictly excluding private agenda, session, and API responses from any offline cache), and opt-in per-device Web Push notifications with lock-screen privacy.
 
 ### 🛡️ Administrative & Operations Management Hub (`/admin`)
 - **Role-Based Access Control (RBAC):**

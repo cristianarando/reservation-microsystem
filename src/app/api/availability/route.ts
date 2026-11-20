@@ -12,6 +12,7 @@ import {
   WEEKDAY_NAMES_PLURAL,
   isTimeOffOnDate,
 } from "@/lib/timeoff-utils";
+import { safeErrorResponse } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -329,7 +330,7 @@ export async function GET(req: Request) {
           staffId: t.staffId,
           staffName: staffProfile.displayName,
           type: t.type,
-          reason: t.reason,
+          reason: t.publicNote ?? null,
           startAt: t.startAt.toISOString(),
           endAt: t.endAt.toISOString(),
         });
@@ -396,8 +397,6 @@ export async function GET(req: Request) {
       { headers: NO_CACHE_HEADERS }
     );
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Error interno";
-    console.error("Availability error:", error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return safeErrorResponse(error, "No se pudo consultar la disponibilidad.");
   }
 }

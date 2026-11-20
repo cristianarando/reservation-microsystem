@@ -36,7 +36,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "No autorizado." }, { status: 403 });
       }
       await clearImpersonator();
-      await setSessionUserId(admin.id);
+      await setSessionUserId(admin.id, admin.sessionVersion);
       return NextResponse.json({ ok: true, user: publicUser(admin) });
     }
 
@@ -66,9 +66,13 @@ export async function POST(req: Request) {
     } else {
       await setImpersonatorId(actingAdminId);
     }
-    await setSessionUserId(targetUser.id);
-    return NextResponse.json({ ok: true, user: publicUser(targetUser) });
-  } catch (error: any) {
+    await setSessionUserId(targetUser.id, targetUser.sessionVersion);
+    return NextResponse.json({
+      ok: true,
+      user: publicUser(targetUser),
+      impersonatorId: targetUser.id === actingAdminId ? null : actingAdminId,
+    });
+  } catch (error: unknown) {
     console.error("Session switch error:", error);
     return NextResponse.json({ error: "Error al cambiar de sesión" }, { status: 500 });
   }

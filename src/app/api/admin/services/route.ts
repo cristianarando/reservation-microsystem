@@ -55,34 +55,57 @@ export async function POST(req: Request) {
       );
     }
 
-    const newService = await prisma.service.create({
-      data: {
-        name: cleanName,
-        description: description ? String(description).trim().slice(0, 400) : null,
-        durationMin: Math.round(numDuration),
-        bufferAfterMin: Math.round(numBuffer),
-        price: numPrice,
-        isActive: true,
-      },
-    });
-
-    let targetStaffIds: string[] = Array.isArray(staffIds) ? staffIds.map(String) : [];
-    if (targetStaffIds.length === 0) {
-      const allActiveStaff = await prisma.staffProfile.findMany({
-        where: { isActive: true },
-        select: { id: true },
-      });
-      targetStaffIds = allActiveStaff.map((s) => s.id);
-    }
+    let targetStaffIds: string[] = Array.isArray(staffIds)
+      ? Array.from(new Set(staffIds.map(String)))
+      : [];
 
     if (targetStaffIds.length > 0) {
-      await prisma.staffService.createMany({
-        data: targetStaffIds.map((sId: string) => ({
-          staffId: sId,
-          serviceId: newService.id,
-        })),
+      const validStaff = await prisma.staffProfile.findMany({
+        where: { id: { in: targetStaffIds } },
+        select: { id: true },
       });
+      if (validStaff.length !== targetStaffIds.length) {
+        return NextResponse.json(
+          { error: "Uno o más profesionales asignados no existen." },
+          { status: 400 }
+        );
+      }
     }
+
+    const newService = await prisma.$transaction(async (tx) => {
+      const created = await tx.service.create({
+        data: {
+          name: cleanName,
+          description: description
+            ? String(description).trim().slice(0, 400)
+            : null,
+          durationMin: Math.round(numDuration),
+          bufferAfterMin: Math.round(numBuffer),
+          price: numPrice,
+          isActive: true,
+        },
+      });
+
+      let assignedIds = targetStaffIds;
+      if (assignedIds.length === 0) {
+        const allActiveStaff = await tx.staffProfile.findMany({
+          where: { isActive: true },
+          select: { id: true },
+        });
+        assignedIds = allActiveStaff.map((s) => s.id);
+      }
+
+      if (assignedIds.length > 0) {
+        await tx.staffService.createMany({
+          data: assignedIds.map((sId: string) => ({
+            staffId: sId,
+            serviceId: created.id,
+          })),
+        });
+      }
+
+      return created;
+    });
 
     return NextResponse.json({ ok: true, service: newService });
   } catch (error: unknown) {
@@ -100,8 +123,16 @@ export async function PUT(req: Request) {
     );
     if (auth.error) return auth.error;
 
-    const { id, name, description, durationMin, bufferAfterMin, price, isActive, staffIds } =
-      await req.json();
+    const {
+      id,
+      name,
+      description,
+      durationMin,
+      bufferAfterMin,
+      price,
+      isActive,
+      staffIds,
+    } = await req.json();
 
     if (!id) {
       return NextResponse.json({ error: "Falta id de servicio" }, { status: 400 });
@@ -114,58 +145,98 @@ export async function PUT(req: Request) {
       );
     }
 
-    if (durationMin !== undefined && (Number(durationMin) < 5 || Number(durationMin) > 480)) {
+    if (
+      durationMin !== undefined &&
+      (Number(durationMin) < 5 || Number(durationMin) > 480)
+    ) {
       return NextResponse.json(
         { error: "La duración debe estar entre 5 y 480 minutos." },
         { status: 400 }
       );
     }
 
-    if (bufferAfterMin !== undefined && (Number(bufferAfterMin) < 0 || Number(bufferAfterMin) > 120)) {
+    if (
+      bufferAfterMin !== undefined &&
+      (Number(bufferAfterMin) < 0 || Number(bufferAfterMin) > 120)
+    ) {
       return NextResponse.json(
-        { error: "El tiempo de limpieza (buffer) debe estar entre 0 y 120 minutos." },
+        {
+          error:
+            "El tiempo de limpieza (buffer) debe estar entre 0 y 120 minutos.",
+        },
         { status: 400 }
       );
     }
 
-    if (price !== undefined && (isNaN(Number(price)) || Number(price) < 0 || Number(price) > 100_000)) {
+    if (
+      price !== undefined &&
+      (isNaN(Number(price)) || Number(price) < 0 || Number(price) > 100_000)
+    ) {
       return NextResponse.json(
         { error: "El precio debe estar entre 0 y 100,000." },
         { status: 400 }
       );
     }
 
-    const updated = await prisma.service.update({
-      where: { id },
-      data: {
-        name: name !== undefined ? String(name).trim().slice(0, 120) : undefined,
-        description:
-          description !== undefined
-            ? description
-              ? String(description).trim().slice(0, 400)
-              : null
-            : undefined,
-        durationMin: durationMin !== undefined ? Math.round(Number(durationMin)) : undefined,
-        bufferAfterMin:
-          bufferAfterMin !== undefined ? Math.round(Number(bufferAfterMin)) : undefined,
-        price: price !== undefined ? Number(price) : undefined,
-        isActive: isActive !== undefined ? Boolean(isActive) : undefined,
-      },
-    });
-
+    let validStaffIds: string[] | undefined = undefined;
     if (Array.isArray(staffIds)) {
-      await prisma.staffService.deleteMany({
-        where: { serviceId: id },
-      });
-      if (staffIds.length > 0) {
-        await prisma.staffService.createMany({
-          data: staffIds.map((sId: string) => ({
-            staffId: String(sId),
-            serviceId: id,
-          })),
+      const requestedStaffIds = Array.from(new Set(staffIds.map(String)));
+      if (requestedStaffIds.length > 0) {
+        const foundStaff = await prisma.staffProfile.findMany({
+          where: { id: { in: requestedStaffIds } },
+          select: { id: true },
         });
+        if (foundStaff.length !== requestedStaffIds.length) {
+          return NextResponse.json(
+            { error: "Uno o más profesionales seleccionados no existen." },
+            { status: 400 }
+          );
+        }
       }
+      validStaffIds = requestedStaffIds;
     }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const svc = await tx.service.update({
+        where: { id },
+        data: {
+          name:
+            name !== undefined ? String(name).trim().slice(0, 120) : undefined,
+          description:
+            description !== undefined
+              ? description
+                ? String(description).trim().slice(0, 400)
+                : null
+              : undefined,
+          durationMin:
+            durationMin !== undefined
+              ? Math.round(Number(durationMin))
+              : undefined,
+          bufferAfterMin:
+            bufferAfterMin !== undefined
+              ? Math.round(Number(bufferAfterMin))
+              : undefined,
+          price: price !== undefined ? Number(price) : undefined,
+          isActive: isActive !== undefined ? Boolean(isActive) : undefined,
+        },
+      });
+
+      if (validStaffIds !== undefined) {
+        await tx.staffService.deleteMany({
+          where: { serviceId: id },
+        });
+        if (validStaffIds.length > 0) {
+          await tx.staffService.createMany({
+            data: validStaffIds.map((sId: string) => ({
+              staffId: sId,
+              serviceId: id,
+            })),
+          });
+        }
+      }
+
+      return svc;
+    });
 
     return NextResponse.json({ ok: true, service: updated });
   } catch (error: unknown) {

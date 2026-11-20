@@ -30,8 +30,14 @@ async function runBrowserTests() {
   console.log("🎭 STARTING PLAYWRIGHT E2E BROWSER EXECUTION (REAL CHROMIUM ENGINE)");
   console.log("==========================================================================\n");
 
+  const executablePath =
+    process.env.PLAYWRIGHT_EXECUTABLE_PATH ||
+    (fs.existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
+
   const browser: Browser = await chromium.launch({
-    channel: "chrome",
+    ...(executablePath
+      ? { executablePath, args: ["--no-sandbox"] }
+      : { channel: "chrome" }),
     headless: true,
   });
 
@@ -368,8 +374,13 @@ async function runBrowserTests() {
       await doctorPage.waitForTimeout(1000);
     }
 
-    const doctorBadge = await doctorPage.$("text=MODO EMPLEADO / DOCTOR");
-    assert(doctorBadge !== null, "TC-07: Login for Dra. Sofía in /admin in MODO EMPLEADO / DOCTOR successful");
+    const doctorBadge = await doctorPage.$(
+      "[data-testid='staff-role-badge'][data-role='PROVIDER'], [data-testid='header-role-badge'][data-role='PROVIDER']"
+    );
+    assert(
+      doctorBadge !== null,
+      "TC-07: Login for Dra. Sofía in /admin in PROVIDER mode successful"
+    );
 
     // Attempt to navigate to customer booking portal '/'
     await doctorPage.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });

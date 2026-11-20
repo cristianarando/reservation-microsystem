@@ -4,8 +4,19 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_DESTRUCTIVE_SEED !== "true"
+  ) {
+    throw new Error(
+      "Refusing to run destructive seed in production without ALLOW_DESTRUCTIVE_SEED=true."
+    );
+  }
+
   console.log("🌱 Starting seed...");
 
+  await prisma.pushDelivery.deleteMany();
+  await prisma.pushSubscription.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.appointment.deleteMany();
   await prisma.timeOff.deleteMany();

@@ -250,7 +250,11 @@ export async function resolveSiteUrl(): Promise<string> {
     process.env.SITE_URL ||
     process.env.APP_URL;
 
-  if (envUrl && envUrl.trim()) {
+  if (
+    envUrl &&
+    envUrl.trim() &&
+    !envUrl.trim().includes("tudominio.com")
+  ) {
     try {
       const parsed = new URL(envUrl.trim());
       if (parsed.protocol === "http:" || parsed.protocol === "https:") {

@@ -37,7 +37,16 @@ export const EMPTY_BOOTSTRAP_PAYLOAD: BootstrapPayload = {
   allUsers: [],
 };
 
-export async function getBootstrapPayload(options: { publicOnly?: boolean } = {}): Promise<BootstrapPayload> {
+export interface BootstrapOptions {
+  publicOnly?: boolean;
+  agendaFrom?: Date | null;
+  agendaTo?: Date | null;
+  usersLimit?: number;
+}
+
+export async function getBootstrapPayload(
+  options: BootstrapOptions = {}
+): Promise<BootstrapPayload> {
   let settings = await prisma.businessSettings.findFirst({
     where: { id: 1 },
   });
@@ -52,7 +61,8 @@ export async function getBootstrapPayload(options: { publicOnly?: boolean } = {}
         tagline: "Reserva tu cita en segundos",
         logoUrl: DEFAULT_BUSINESS_LOGO,
         addressText: "Av. Principal 123, Bolivia",
-        googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=-17.3895,-66.1568",
+        googleMapsUrl:
+          "https://www.google.com/maps/search/?api=1&query=-17.3895,-66.1568",
         phoneWhatsapp: "+59170000000",
         currencySymbol: "Bs",
         staffLabel: "Especialista",
@@ -116,6 +126,7 @@ export async function getBootstrapPayload(options: { publicOnly?: boolean } = {}
                 email: true,
                 role: true,
                 phone: true,
+                pendingStaffUpgrade: true,
               },
             },
           }
@@ -131,10 +142,22 @@ export async function getBootstrapPayload(options: { publicOnly?: boolean } = {}
     },
   });
 
-  // Public staff payload must not leak the linked account id (used to be an account-takeover vector).
+  // Public staff payload must not leak the linked account id or internal TimeOff reasons.
   const safeStaff = isStaffOrAdmin
     ? staff
-    : staff.map(({ userId: _userId, ...rest }) => rest);
+    : staff.map(({ userId: _userId, timeOffs, ...rest }) => ({
+        ...rest,
+        timeOffs: (timeOffs || []).map((t) => ({
+          id: t.id,
+          staffId: t.staffId,
+          startAt: t.startAt,
+          endAt: t.endAt,
+          type: t.type,
+          reason: t.publicNote ?? null,
+          publicNote: t.publicNote ?? null,
+          createdAt: t.createdAt,
+        })),
+      }));
 
   let userAppointments: any[] = [];
   let userHistory: BootstrapHistoryPage = {
@@ -146,13 +169,19 @@ export async function getBootstrapPayload(options: { publicOnly?: boolean } = {}
   let notifications: any[] = [];
 
   if (currentUser) {
-    const [custData, notifs] = await Promise.all([
+    // Always fetch ALL unread notifications so no pending alert is ever dropped,
+    // plus the 10 most recent read notifications for recent context.
+    const [custData, unreadNotifs, readNotifs] = await Promise.all([
       getCustomerBootstrapAppointments(
         currentUser.id,
         settings?.minCancelNoticeHours ?? 6
       ),
       prisma.notification.findMany({
-        where: { userId: currentUser.id },
+        where: { userId: currentUser.id, isRead: false },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.notification.findMany({
+        where: { userId: currentUser.id, isRead: true },
         orderBy: { createdAt: "desc" },
         take: 10,
       }),
@@ -160,15 +189,26 @@ export async function getBootstrapPayload(options: { publicOnly?: boolean } = {}
 
     userAppointments = custData.userAppointments;
     userHistory = custData.userHistory;
-    notifications = notifs;
+    notifications = [...unreadNotifs, ...readNotifs];
   }
 
   let allAppointments: any[] = [];
   let allUsers: any[] = [];
 
+  const agendaDateFilter =
+    options.agendaFrom || options.agendaTo
+      ? {
+          startAt: {
+            ...(options.agendaFrom ? { gte: options.agendaFrom } : {}),
+            ...(options.agendaTo ? { lte: options.agendaTo } : {}),
+          },
+        }
+      : {};
+
   // Expose full roster & global appointments only to ADMIN; PROVIDER receives only their own agenda
   if (currentUser && currentUser.role === "ADMIN") {
     allAppointments = await prisma.appointment.findMany({
+      where: agendaDateFilter,
       include: {
         service: true,
         staff: true,
@@ -197,12 +237,20 @@ export async function getBootstrapPayload(options: { publicOnly?: boolean } = {}
         noShowCount: true,
         completedCount: true,
       },
+      ...(options.usersLimit && options.usersLimit > 0
+        ? { take: options.usersLimit }
+        : {}),
     });
   } else if (currentUser && currentUser.role === "PROVIDER") {
-    const ownProfile = staff.find((s) => (s as { userId?: string }).userId === currentUser.id);
+    const ownProfile = staff.find(
+      (s) => (s as { userId?: string }).userId === currentUser.id
+    );
     if (ownProfile) {
       allAppointments = await prisma.appointment.findMany({
-        where: { staffId: ownProfile.id },
+        where: {
+          staffId: ownProfile.id,
+          ...agendaDateFilter,
+        },
         include: {
           service: true,
           staff: true,
@@ -222,15 +270,22 @@ export async function getBootstrapPayload(options: { publicOnly?: boolean } = {}
     }
   }
 
-  // Never ship credential material or internal notes to the browser.
+  // Never ship credential material or internal notes/invite hashes to the browser.
   const safeCurrentUser = currentUser
-    ? (({ passwordHash: _ph, googleId: _gid, adminNotes: _notes, ...rest }) => rest)(
-        currentUser as any
-      )
+    ? (({
+        passwordHash: _ph,
+        googleId: _gid,
+        adminNotes: _notes,
+        staffInviteTokenHash: _ith,
+        staffInviteExpiresAt: _ite,
+        ...rest
+      }) => rest)(currentUser as any)
     : null;
 
   const impersonatorId =
-    currentUser && currentUser.role === "PROVIDER" ? await getImpersonatorId() : null;
+    currentUser && currentUser.role === "PROVIDER"
+      ? await getImpersonatorId()
+      : null;
 
   return {
     settings,

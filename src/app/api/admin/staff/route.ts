@@ -1,6 +1,6 @@
 // src/app/api/admin/staff/route.ts
 import { NextResponse } from "next/server";
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import {
   requireAdmin,
@@ -19,6 +19,8 @@ import { getRandomStaffAvatar } from "@/lib/avatars";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
+
+const STAFF_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Solo el ADMIN (Dueño principal) puede dar de alta o revocar personal/doctores
 export async function POST(req: Request) {
@@ -58,96 +60,150 @@ export async function POST(req: Request) {
       );
     }
 
-    // Generate cryptographically random initial password when omitted (avoid hardcoded defaults)
+    // Generate cryptographically random initial password and invitation token
     const rawPassword =
       typeof body.password === "string" && body.password.trim().length >= 6
         ? body.password.trim()
         : randomBytes(12).toString("base64url");
     const initialStaffPassword = await bcrypt.hash(rawPassword, 10);
 
-    let staffUser = await prisma.user.findUnique({ where: { email } });
-    if (!staffUser) {
-      staffUser = await prisma.user.create({
-        data: {
-          email,
-          name: displayName,
-          passwordHash: initialStaffPassword,
-          phone: phone || "+591 70000000",
-          role: "PROVIDER",
-          avatarUrl,
-        },
-      });
-    } else {
-      const existingProfile = await prisma.staffProfile.findUnique({
-        where: { userId: staffUser.id },
-      });
-      if (existingProfile) {
-        return NextResponse.json(
-          { error: "Este correo ya pertenece a un profesional registrado en el equipo." },
-          { status: 409 }
-        );
-      }
-
-      // Never demote an existing ADMIN account to PROVIDER
-      staffUser = await prisma.user.update({
-        where: { id: staffUser.id },
-        data: {
-          role: staffUser.role === "ADMIN" ? "ADMIN" : "PROVIDER",
-          name: displayName,
-          passwordHash: staffUser.passwordHash || initialStaffPassword,
-          phone: phone || staffUser.phone,
-        },
-      });
-    }
+    const inviteToken = randomBytes(24).toString("base64url");
+    const inviteTokenHash = createHash("sha256").update(inviteToken).digest("hex");
+    const inviteExpiresAt = new Date(Date.now() + STAFF_INVITE_TTL_MS);
 
     const allServices = await prisma.service.findMany({ where: { isActive: true } });
     const validIdSet = new Set(allServices.map((s) => s.id));
+    if (Array.isArray(body.serviceIds)) {
+      const invalidIds = body.serviceIds.map(String).filter((id: string) => !validIdSet.has(id));
+      if (invalidIds.length > 0) {
+        return NextResponse.json(
+          { error: "Uno o más servicios seleccionados no existen o están inactivos." },
+          { status: 400 }
+        );
+      }
+    }
     const targetServiceIds: string[] = Array.isArray(body.serviceIds)
-      ? body.serviceIds.map(String).filter((id: string) => validIdSet.has(id))
+      ? Array.from(new Set(body.serviceIds.map(String)))
       : allServices.map((s) => s.id);
 
-    const newStaff = await prisma.staffProfile.create({
-      data: {
-        userId: staffUser.id,
-        displayName,
-        specialtyTitle,
-        avatarUrl: avatarUrl || getRandomStaffAvatar(),
-        isActive: true,
-        services: {
-          create: targetServiceIds.map((serviceId) => ({
-            serviceId,
-          })),
-        },
-        workingShifts: {
-          create: [1, 2, 3, 4, 5, 6].map((day) => ({
-            dayOfWeek: day,
-            startTime: "09:00",
-            endTime: day === 6 ? "13:00" : "18:00",
-          })),
-        },
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            phone: true,
-            role: true,
-            avatarUrl: true,
+    const result = await prisma.$transaction(async (tx) => {
+      let staffUser = await tx.user.findUnique({ where: { email } });
+      let requiresVerification = false;
+
+      if (!staffUser) {
+        staffUser = await tx.user.create({
+          data: {
+            email,
+            name: displayName,
+            passwordHash: initialStaffPassword,
+            phone: phone || "+591 70000000",
+            role: "PROVIDER",
+            avatarUrl,
+            sessionVersion: 1,
+            pendingStaffUpgrade: false,
+            staffInviteTokenHash: inviteTokenHash,
+            staffInviteExpiresAt: inviteExpiresAt,
+          },
+        });
+      } else {
+        const existingProfile = await tx.staffProfile.findUnique({
+          where: { userId: staffUser.id },
+        });
+        if (existingProfile) {
+          throw new Error("DUPLICATE_STAFF_PROFILE");
+        }
+
+        if (staffUser.role === "ADMIN") {
+          staffUser = await tx.user.update({
+            where: { id: staffUser.id },
+            data: {
+              name: displayName,
+              phone: phone || staffUser.phone,
+            },
+          });
+        } else {
+          // Existing CUSTOMER account: never inherit unverified local password or keep existing sessions active.
+          // Rotate credentials, revoke prior sessions via sessionVersion++, and require holder verification
+          // before elevating role from CUSTOMER to PROVIDER.
+          requiresVerification = true;
+          staffUser = await tx.user.update({
+            where: { id: staffUser.id },
+            data: {
+              role: "CUSTOMER",
+              pendingStaffUpgrade: true,
+              name: displayName,
+              passwordHash: initialStaffPassword,
+              phone: phone || staffUser.phone,
+              sessionVersion: { increment: 1 },
+              staffInviteTokenHash: inviteTokenHash,
+              staffInviteExpiresAt: inviteExpiresAt,
+            },
+          });
+
+          // Deactivate any prior push subscriptions bound during unverified customer sessions
+          await tx.pushSubscription.updateMany({
+            where: { userId: staffUser.id, status: "ACTIVE" },
+            data: { status: "REVOKED" },
+          });
+        }
+      }
+
+      const newStaff = await tx.staffProfile.create({
+        data: {
+          userId: staffUser.id,
+          displayName,
+          specialtyTitle,
+          avatarUrl: avatarUrl || getRandomStaffAvatar(),
+          isActive: true,
+          services: {
+            create: targetServiceIds.map((serviceId) => ({
+              serviceId,
+            })),
+          },
+          workingShifts: {
+            create: [1, 2, 3, 4, 5, 6].map((day) => ({
+              dayOfWeek: day,
+              startTime: "09:00",
+              endTime: day === 6 ? "13:00" : "18:00",
+            })),
           },
         },
-        services: true,
-        workingShifts: true,
-      },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true,
+              role: true,
+              avatarUrl: true,
+              pendingStaffUpgrade: true,
+            },
+          },
+          services: true,
+          workingShifts: true,
+        },
+      });
+
+      return { newStaff, staffUser, requiresVerification };
     });
 
     return NextResponse.json({
       ok: true,
-      staff: newStaff,
-      user: sanitizeUserForClient(staffUser),
+      staff: result.newStaff,
+      user: sanitizeUserForClient(result.staffUser),
+      inviteToken,
+      invitePath: `/admin?invite=${encodeURIComponent(inviteToken)}&email=${encodeURIComponent(email)}`,
+      temporaryPassword: rawPassword,
+      requiresVerification: result.requiresVerification,
     });
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === "DUPLICATE_STAFF_PROFILE") {
+      return NextResponse.json(
+        { error: "Este correo ya pertenece a un profesional registrado en el equipo." },
+        { status: 409 }
+      );
+    }
     return safeErrorResponse(error, "No se pudo registrar al profesional.");
   }
 }
@@ -171,7 +227,20 @@ export async function PATCH(req: Request) {
       customHorizonDays,
       customLeadTimeMin,
       serviceIds,
+      notifyAllStaff,
     } = body;
+
+    // Optional: allow ADMIN to update their own notifyAllStaff preference
+    if (notifyAllStaff !== undefined && user.role === "ADMIN" && !staffId) {
+      const updatedAdmin = await prisma.user.update({
+        where: { id: user.id },
+        data: { notifyAllStaff: Boolean(notifyAllStaff) },
+      });
+      return NextResponse.json({
+        ok: true,
+        user: sanitizeUserForClient(updatedAdmin),
+      });
+    }
 
     if (!staffId || typeof staffId !== "string") {
       return NextResponse.json({ error: "staffId requerido" }, { status: 400 });
@@ -189,72 +258,96 @@ export async function PATCH(req: Request) {
       validatedAvatar = avatarCheck.value;
     }
 
+    let validServiceIds: string[] | undefined = undefined;
     if (Array.isArray(serviceIds)) {
+      const requestedIds = Array.from(new Set(serviceIds.map(String)));
       const validServices = await prisma.service.findMany({
-        where: { id: { in: serviceIds.map(String) } },
+        where: { id: { in: requestedIds } },
         select: { id: true },
       });
-      const validIds = validServices.map((s) => s.id);
-      await prisma.staffService.deleteMany({
-        where: { staffId },
-      });
-      if (validIds.length > 0) {
-        await prisma.staffService.createMany({
-          data: validIds.map((svcId: string) => ({
-            staffId,
-            serviceId: svcId,
-          })),
-        });
+      if (validServices.length !== requestedIds.length) {
+        return NextResponse.json(
+          { error: "Uno o más servicios asignados no son válidos." },
+          { status: 400 }
+        );
       }
+      validServiceIds = validServices.map((s) => s.id);
     }
 
-    const updated = await prisma.staffProfile.update({
-      where: { id: staffId },
-      data: {
-        ...(isActive !== undefined && user.role === "ADMIN"
-          ? { isActive: Boolean(isActive) }
-          : {}),
-        ...(typeof displayName === "string" && displayName.trim().length >= 2
-          ? { displayName: displayName.trim().slice(0, 120) }
-          : {}),
-        ...(typeof specialtyTitle === "string" && specialtyTitle.trim().length >= 2
-          ? { specialtyTitle: specialtyTitle.trim().slice(0, 120) }
-          : {}),
-        ...(validatedAvatar !== undefined ? { avatarUrl: validatedAvatar } : {}),
-        ...(customHorizonDays !== undefined
-          ? {
-              customHorizonDays:
-                customHorizonDays === null
-                  ? null
-                  : clampInt(customHorizonDays, 1, 90, 7),
-            }
-          : {}),
-        ...(customLeadTimeMin !== undefined
-          ? {
-              customLeadTimeMin:
-                customLeadTimeMin === null
-                  ? null
-                  : clampInt(customLeadTimeMin, 0, 1440, 30),
-            }
-          : {}),
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            phone: true,
-            role: true,
-            avatarUrl: true,
-          },
+    // Both ADMIN and the owning PROVIDER can pause/resume their own agenda (isActive).
+    // Revoking staff access altogether remains strictly in DELETE (Admin-only).
+    const updated = await prisma.$transaction(async (tx) => {
+      if (validServiceIds !== undefined) {
+        await tx.staffService.deleteMany({
+          where: { staffId },
+        });
+        if (validServiceIds.length > 0) {
+          await tx.staffService.createMany({
+            data: validServiceIds.map((svcId: string) => ({
+              staffId,
+              serviceId: svcId,
+            })),
+          });
+        }
+      }
+
+      if (notifyAllStaff !== undefined && user.role === "ADMIN") {
+        await tx.user.update({
+          where: { id: user.id },
+          data: { notifyAllStaff: Boolean(notifyAllStaff) },
+        });
+      }
+
+      return tx.staffProfile.update({
+        where: { id: staffId },
+        data: {
+          ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
+          ...(typeof displayName === "string" && displayName.trim().length >= 2
+            ? { displayName: displayName.trim().slice(0, 120) }
+            : {}),
+          ...(typeof specialtyTitle === "string" && specialtyTitle.trim().length >= 2
+            ? { specialtyTitle: specialtyTitle.trim().slice(0, 120) }
+            : {}),
+          ...(validatedAvatar !== undefined ? { avatarUrl: validatedAvatar } : {}),
+          ...(customHorizonDays !== undefined
+            ? {
+                customHorizonDays:
+                  customHorizonDays === null
+                    ? null
+                    : clampInt(customHorizonDays, 1, 90, 7),
+              }
+            : {}),
+          ...(customLeadTimeMin !== undefined
+            ? {
+                customLeadTimeMin:
+                  customLeadTimeMin === null
+                    ? null
+                    : clampInt(customLeadTimeMin, 0, 1440, 30),
+              }
+            : {}),
         },
-        services: true,
-        workingShifts: true,
-      },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true,
+              role: true,
+              avatarUrl: true,
+            },
+          },
+          services: true,
+          workingShifts: true,
+        },
+      });
     });
 
-    return NextResponse.json({ ok: true, staff: updated });
+    return NextResponse.json({
+      ok: true,
+      staff: updated,
+      effectiveIsActive: updated.isActive,
+    });
   } catch (error: unknown) {
     return safeErrorResponse(error, "No se pudo actualizar el perfil del profesional.");
   }
@@ -282,17 +375,30 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Profesional no encontrado" }, { status: 404 });
     }
 
-    await prisma.staffProfile.update({
-      where: { id: staffId },
-      data: { isActive: false },
-    });
-
-    if (profile.userId && profile.userId !== user.id) {
-      await prisma.user.update({
-        where: { id: profile.userId },
-        data: { role: "CUSTOMER" },
+    await prisma.$transaction(async (tx) => {
+      await tx.staffProfile.update({
+        where: { id: staffId },
+        data: { isActive: false },
       });
-    }
+
+      if (profile.userId && profile.userId !== user.id) {
+        await tx.user.update({
+          where: { id: profile.userId },
+          data: {
+            role: "CUSTOMER",
+            pendingStaffUpgrade: false,
+            staffInviteTokenHash: null,
+            staffInviteExpiresAt: null,
+            sessionVersion: { increment: 1 },
+          },
+        });
+
+        await tx.pushSubscription.updateMany({
+          where: { userId: profile.userId, status: "ACTIVE" },
+          data: { status: "REVOKED" },
+        });
+      }
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error: unknown) {

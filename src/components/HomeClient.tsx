@@ -16,21 +16,31 @@ export function HomeClient({ initialData }: HomeClientProps) {
   const [data, setData] = useState<BootstrapPayload | null>(initialData);
   const [loading, setLoading] = useState<boolean>(!initialData);
 
+  const inFlightRef = React.useRef<Promise<void> | null>(null);
+
   const loadData = useCallback(async () => {
-    try {
-      const res = await fetch("/api/bootstrap", { cache: "no-store" });
-      if (!res.ok) {
-        console.error("Bootstrap HTTP status:", res.status);
-      }
-      const json = await res.json().catch(() => null);
-      if (json) {
-        setData(json);
-      }
-    } catch (e) {
-      console.error("Error loading bootstrap data:", e);
-    } finally {
-      setLoading(false);
+    if (inFlightRef.current) {
+      return inFlightRef.current;
     }
+    const task = (async () => {
+      try {
+        const res = await fetch("/api/bootstrap", { cache: "no-store" });
+        if (!res.ok) {
+          console.error("Bootstrap HTTP status:", res.status);
+        }
+        const json = await res.json().catch(() => null);
+        if (json) {
+          setData(json);
+        }
+      } catch (e) {
+        console.error("Error loading bootstrap data:", e);
+      } finally {
+        setLoading(false);
+        inFlightRef.current = null;
+      }
+    })();
+    inFlightRef.current = task;
+    return task;
   }, []);
 
   useEffect(() => {

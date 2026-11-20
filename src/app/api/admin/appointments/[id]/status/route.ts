@@ -10,8 +10,23 @@ import {
 } from "@/lib/api-guard";
 import { VALID_APPOINTMENT_STATUSES } from "@/lib/validation/input-validators";
 import { emitRealtimeEvent } from "@/lib/realtime-events";
+import {
+  cancelAppointmentInTx,
+  validateAppointmentStatusTransition,
+} from "@/lib/appointment-lifecycle";
+import { dispatchPendingPushDeliveries } from "@/lib/web-push";
 
 export const dynamic = "force-dynamic";
+
+class StatusTransitionError extends Error {
+  status: number;
+  currentStatus?: string;
+  constructor(message: string, status = 409, currentStatus?: string) {
+    super(message);
+    this.status = status;
+    this.currentStatus = currentStatus;
+  }
+}
 
 export async function PUT(
   req: Request,
@@ -39,16 +54,16 @@ export async function PUT(
       );
     }
 
-    const appointment = await prisma.appointment.findUnique({
+    const initialCheck = await prisma.appointment.findUnique({
       where: { id },
-      include: { customer: true, service: true, staff: true },
+      select: { id: true, staffId: true },
     });
 
-    if (!appointment) {
+    if (!initialCheck) {
       return NextResponse.json({ error: "Cita no encontrada" }, { status: 404 });
     }
 
-    const ownershipErr = await verifyProviderOwnsStaff(user, appointment.staffId);
+    const ownershipErr = await verifyProviderOwnsStaff(user, initialCheck.staffId);
     if (ownershipErr) return ownershipErr;
 
     const cleanReason =
@@ -58,48 +73,112 @@ export async function PUT(
         ? cleanReason || "Cancelada por el profesional / imprevisto de agenda"
         : cleanReason;
 
-    const previousStatus = appointment.status;
-
     const result = await prisma.$transaction(async (tx) => {
-      const updated = await tx.appointment.update({
+      const currentApt = await tx.appointment.findUnique({
         where: { id },
-        data: {
-          status,
-          ...(effectiveReason ? { staffMoveReason: effectiveReason } : {}),
-        },
+        include: { customer: true, service: true, staff: true },
       });
 
-      let finalCustomer = appointment.customer;
+      if (!currentApt) {
+        throw new StatusTransitionError("Cita no encontrada", 404);
+      }
 
-      if (status === "CANCELLED" && previousStatus !== "CANCELLED") {
-        const aptDate = new Date(appointment.startAt);
-        const timeFormatted = aptDate.toLocaleTimeString("es-ES", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-        const dateFormatted = aptDate.toLocaleDateString("es-ES", {
-          weekday: "long",
-          day: "numeric",
-          month: "short",
-        });
-        const serviceName = appointment.service?.name || "Servicio";
+      const previousStatus = currentApt.status;
+      const transition = validateAppointmentStatusTransition(
+        previousStatus,
+        status
+      );
 
-        await tx.notification.create({
-          data: {
-            userId: appointment.customerId,
-            appointmentId: appointment.id,
-            type: "APPOINTMENT_CANCELLED",
-            title: `Se canceló tu cita de las ${timeFormatted} (${serviceName})`,
-            message: `Tu cita de ${serviceName} del ${dateFormatted} a las ${timeFormatted} con ${
-              appointment.staff?.displayName || "el profesional"
-            } fue cancelada: "${
-              cleanReason || "Imprevisto de agenda"
-            }". Puedes agendar un nuevo horario cuando desees.`,
+      if (!transition.allowed) {
+        throw new StatusTransitionError(
+          transition.error || "Transición de estado no permitida.",
+          409,
+          previousStatus
+        );
+      }
+
+      // Idempotent repeat: if status is already `status`, do not increment counters or duplicate notifications
+      if (transition.idempotent) {
+        return {
+          updated: currentApt,
+          finalCustomer: currentApt.customer,
+          idempotent: true,
+          realtimeEvent: null,
+        };
+      }
+
+      // If reactivating a CANCELLED appointment into a slot-occupying status, verify the slot is still free
+      if (transition.requiresSlotRevalidation) {
+        const overlappingApt = await tx.appointment.findFirst({
+          where: {
+            id: { not: currentApt.id },
+            staffId: currentApt.staffId,
+            status: { in: ["CONFIRMED", "RESCHEDULED_BY_STAFF"] },
+            startAt: { lt: currentApt.endAt },
+            endAt: { gt: currentApt.startAt },
           },
+        });
+        if (overlappingApt) {
+          throw new StatusTransitionError(
+            "No se puede reactivar esta cita porque su horario ya fue ocupado por otra reserva.",
+            409,
+            previousStatus
+          );
+        }
+
+        const overlappingTimeOff = await tx.timeOff.findFirst({
+          where: {
+            staffId: currentApt.staffId,
+            startAt: { lt: currentApt.endAt },
+            endAt: { gt: currentApt.startAt },
+          },
+        });
+        if (overlappingTimeOff) {
+          throw new StatusTransitionError(
+            "No se puede reactivar esta cita porque existe un bloqueo de horario en esa franja.",
+            409,
+            previousStatus
+          );
+        }
+      }
+
+      let updated = currentApt;
+      let cancelEvent = null;
+
+      if (status === "CANCELLED") {
+        const cancelRes = await cancelAppointmentInTx(tx, {
+          appointmentId: id,
+          actorUser: user,
+          reason: cleanReason,
+        });
+        updated = cancelRes.appointment;
+        cancelEvent = cancelRes.realtimeEvent;
+      } else {
+        const guardedUpdate = await tx.appointment.updateMany({
+          where: {
+            id,
+            status: previousStatus,
+          },
+          data: {
+            status,
+            ...(effectiveReason ? { staffMoveReason: effectiveReason } : {}),
+          },
+        });
+
+        if (guardedUpdate.count === 0) {
+          throw new StatusTransitionError(
+            "El estado de la cita fue modificado concurrentemente. Refresca la agenda e intenta de nuevo.",
+            409
+          );
+        }
+
+        updated = await tx.appointment.findUniqueOrThrow({
+          where: { id },
+          include: { customer: true, service: true, staff: true },
         });
       }
 
-      // Idempotent counter deltas: only adjust when actually transitioning in or out of COMPLETED / NO_SHOW
+      // Compute counter deltas based on the guarded transition from previousStatus -> status
       let completedDelta = 0;
       if (previousStatus !== "COMPLETED" && status === "COMPLETED") {
         completedDelta = 1;
@@ -114,14 +193,18 @@ export async function PUT(
         noShowDelta = -1;
       }
 
+      const freshCustomer = await tx.user.findUniqueOrThrow({
+        where: { id: currentApt.customerId },
+      });
+
       const nextCompleted = Math.max(
         0,
-        finalCustomer.completedCount + completedDelta
+        freshCustomer.completedCount + completedDelta
       );
-      const nextNoShow = Math.max(0, finalCustomer.noShowCount + noShowDelta);
+      const nextNoShow = Math.max(0, freshCustomer.noShowCount + noShowDelta);
 
       const canModifyBlock = user.role === "ADMIN" || status === "NO_SHOW";
-      let nextBlocked = finalCustomer.isBlocked;
+      let nextBlocked = freshCustomer.isBlocked;
       if (status === "NO_SHOW") {
         if (blockCustomer || nextNoShow >= 2) {
           nextBlocked = true;
@@ -130,13 +213,14 @@ export async function PUT(
         nextBlocked = Boolean(blockCustomer);
       }
 
+      let finalCustomer = freshCustomer;
       if (
-        nextCompleted !== finalCustomer.completedCount ||
-        nextNoShow !== finalCustomer.noShowCount ||
-        nextBlocked !== finalCustomer.isBlocked
+        completedDelta !== 0 ||
+        noShowDelta !== 0 ||
+        nextBlocked !== freshCustomer.isBlocked
       ) {
         finalCustomer = await tx.user.update({
-          where: { id: appointment.customerId },
+          where: { id: currentApt.customerId },
           data: {
             completedCount: nextCompleted,
             noShowCount: nextNoShow,
@@ -145,22 +229,43 @@ export async function PUT(
         });
       }
 
-      return { updated, finalCustomer };
+      return {
+        updated,
+        finalCustomer,
+        idempotent: false,
+        realtimeEvent:
+          cancelEvent || {
+            type: "APPOINTMENT_UPDATED" as const,
+            appointmentId: updated.id,
+            staffId: updated.staffId,
+            customerId: updated.customerId,
+            actorUserId: user.id,
+            status,
+          },
+      };
     });
 
-    emitRealtimeEvent({
-      type: "APPOINTMENT_UPDATED",
-      appointmentId: result.updated.id,
-      staffId: result.updated.staffId,
-      status,
-    });
+    if (result.realtimeEvent) {
+      emitRealtimeEvent(result.realtimeEvent);
+      void dispatchPendingPushDeliveries().catch(() => {});
+    }
 
     return NextResponse.json({
       ok: true,
+      idempotent: result.idempotent,
       appointment: result.updated,
       customer: sanitizeUserForClient(result.finalCustomer),
     });
   } catch (error: unknown) {
+    if (error instanceof StatusTransitionError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          ...(error.currentStatus ? { currentStatus: error.currentStatus } : {}),
+        },
+        { status: error.status }
+      );
+    }
     return safeErrorResponse(error, "No se pudo actualizar el estado de la cita.");
   }
 }

@@ -14,6 +14,10 @@ services:
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:?Define NEXT_PUBLIC_APP_URL (ej. https://tudominio.com)}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-}
+      - PUSH_DISPATCH_PAUSED=${PUSH_DISPATCH_PAUSED:-false}
       - TZ=${TZ:-America/La_Paz}
     volumes:
       - ./data:/app/data

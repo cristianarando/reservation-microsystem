@@ -22,6 +22,8 @@ import {
   MapPin,
   Pencil,
   FileText,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import BranchMap from "./BranchMap";
 import InteractiveMapPicker from "./InteractiveMapPicker";
@@ -54,6 +56,13 @@ import {
   validateScheduleOverride,
   validateVacationRange,
 } from "@/lib/validation/acceptance-criteria";
+import {
+  detectDevicePushState,
+  DevicePushState,
+  showDeduplicatedSystemNotification,
+  subscribeDeviceToWebPush,
+  unsubscribeDeviceFromWebPush,
+} from "@/lib/push-client";
 
 interface AdminAppProps {
   initialData: any;
@@ -410,10 +419,16 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
         showToast("error", "Error", data.error || "No se pudo actualizar el estado.");
         return;
       }
+      const effectiveActive =
+        typeof data.effectiveIsActive === "boolean"
+          ? data.effectiveIsActive
+          : typeof data.staff?.isActive === "boolean"
+          ? data.staff.isActive
+          : newActiveState;
       showToast(
         "success",
-        newActiveState ? "¡Agenda Reanudada!" : "🏖️ ¡Modo Vacaciones Activado!",
-        newActiveState
+        effectiveActive ? "¡Agenda Reanudada!" : "🏖️ ¡Modo Vacaciones Activado!",
+        effectiveActive
           ? "El profesional vuelve a estar visible en el portal para recibir reservas."
           : "El profesional ha sido pausado y ocultado del portal de reservas."
       );
@@ -652,6 +667,130 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
   const latestShowToastRef = React.useRef(showToast);
   latestShowToastRef.current = showToast;
 
+  const [pushState, setPushState] = useState<DevicePushState>("prompt");
+  const [pushBusy, setPushBusy] = useState<boolean>(false);
+  const [notifyAllStaffPref, setNotifyAllStaffPref] = useState<boolean>(
+    Boolean(currentUser?.notifyAllStaff)
+  );
+  const isImpersonating = Boolean(
+    initialData?.impersonatorId &&
+      currentUser?.id &&
+      initialData.impersonatorId !== currentUser.id
+  );
+
+  useEffect(() => {
+    setNotifyAllStaffPref(Boolean(currentUser?.notifyAllStaff));
+  }, [currentUser?.notifyAllStaff]);
+
+  useEffect(() => {
+    if (isImpersonating) {
+      setPushState("unsubscribed");
+      return;
+    }
+    let active = true;
+    detectDevicePushState().then((st) => {
+      if (active) setPushState(st);
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.id, isImpersonating]);
+
+  const handleToggleAdminPush = async () => {
+    if (isImpersonating) {
+      showToast(
+        "warning",
+        "Vista previa activa",
+        "Vuelve a tu sesión de Administrador antes de vincular avisos en este dispositivo."
+      );
+      return;
+    }
+    setPushBusy(true);
+    try {
+      if (pushState === "subscribed") {
+        const res = await unsubscribeDeviceFromWebPush();
+        setPushState(res.state);
+        showToast("info", "Avisos desactivados", "Este dispositivo ya no recibirá notificaciones push.");
+      } else {
+        const res = await subscribeDeviceToWebPush();
+        setPushState(res.state);
+        if (res.ok) {
+          showToast(
+            "success",
+            "🔔 Avisos activados",
+            "Recibirás notificaciones en este dispositivo ante nuevas citas o cancelaciones."
+          );
+        } else if (res.error) {
+          showToast("warning", "No se pudieron activar avisos", res.error);
+        }
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleToggleNotifyAllStaff = async () => {
+    if (!isOwnerAdmin) return;
+    const nextVal = !notifyAllStaffPref;
+    setNotifyAllStaffPref(nextVal);
+    try {
+      const res = await fetch("/api/admin/staff", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notifyAllStaff: nextVal }),
+      });
+      if (!res.ok) {
+        setNotifyAllStaffPref(!nextVal);
+        showToast("error", "Error", "No se pudo actualizar la preferencia de avisos.");
+        return;
+      }
+      showToast(
+        "info",
+        nextVal ? "Avisos de todo el equipo activados" : "Avisos limitados a tu propia agenda",
+        nextVal
+          ? "Recibirás alertas cuando cualquier profesional reciba o cancele citas."
+          : "La vista de equipo sigue disponible, pero solo recibirás alertas de tu propia agenda."
+      );
+      onRefresh();
+    } catch {
+      setNotifyAllStaffPref(!nextVal);
+    }
+  };
+
+  // Handle URL deep-linking (?tab=agenda&date=YYYY-MM-DD&appointmentId=...) and Service Worker notificationclick
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const applyDeepLink = (rawSearch: string) => {
+      const params = new URLSearchParams(rawSearch);
+      const tabParam = params.get("tab");
+      const dateParam = params.get("date");
+      if (tabParam === "agenda" || tabParam === "shifts") {
+        setActiveTab(tabParam);
+      }
+      if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+        setAgendaDateStr(dateParam);
+      }
+    };
+    applyDeepLink(window.location.search);
+
+    const onSwMessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (msg && msg.type === "PUSH_NOTIFICATION_CLICK" && typeof msg.url === "string") {
+        try {
+          const parsed = new URL(msg.url, window.location.origin);
+          applyDeepLink(parsed.search);
+          latestOnRefreshRef.current();
+        } catch {
+          // Ignore malformed deep link
+        }
+      }
+    };
+    navigator.serviceWorker?.addEventListener("message", onSwMessage);
+    return () => {
+      navigator.serviceWorker?.removeEventListener("message", onSwMessage);
+    };
+  }, []);
+
   // Real-time synchronization via Server-Sent Events (SSE) + focus + fallback polling
   useEffect(() => {
     const triggerRefresh = () => {
@@ -673,6 +812,9 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
 
           latestOnRefreshRef.current();
 
+          // Respect server-side suppressAlert (e.g. self-action or admin team view without notifyAllStaff)
+          if (ev.suppressAlert) return;
+
           if (ev.type === "APPOINTMENT_CREATED") {
             const timeLabel = ev.startAt
               ? new Date(ev.startAt).toLocaleTimeString([], {
@@ -685,6 +827,12 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
               "🔔 ¡Nueva cita registrada!",
               `${ev.customerName || "Un cliente"} agendó ${ev.serviceName || "un servicio"}${timeLabel ? ` a las ${timeLabel}` : ""}.`
             );
+            void showDeduplicatedSystemNotification({
+              title: "Tienes una nueva cita",
+              body: "Se registró una nueva reserva en tu agenda.",
+              tag: ev.eventKey || `apt-new-${ev.appointmentId || Date.now()}`,
+              url: "/admin?tab=agenda",
+            });
           } else if (
             ev.type === "APPOINTMENT_CANCELLED" &&
             ev.cancelledBy === "CUSTOMER"
@@ -694,6 +842,12 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
               "Cita cancelada por el cliente",
               "El horario ha quedado libre nuevamente en tu agenda."
             );
+            void showDeduplicatedSystemNotification({
+              title: "Se liberó un horario en tu agenda",
+              body: "Un cliente canceló su reserva. Revisa tu agenda actualizada.",
+              tag: ev.eventKey || `apt-cust-cancel-${ev.appointmentId || Date.now()}`,
+              url: "/admin?tab=agenda",
+            });
           }
         } catch {
           // Ignore keepalive or malformed frames
@@ -1203,6 +1357,8 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span
+                data-testid="staff-role-badge"
+                data-role={currentUser?.role || "PROVIDER"}
                 className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
                   isOwnerAdmin
                     ? "bg-[#1F1F23] text-white"
@@ -1223,7 +1379,62 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {/* Device Web Push toggle (disabled during impersonation preview) */}
+          {pushState !== "unsupported" && (
+            <button
+              type="button"
+              disabled={pushBusy || isImpersonating || pushState === "denied"}
+              onClick={handleToggleAdminPush}
+              data-testid="admin-push-toggle-btn"
+              title={
+                isImpersonating
+                  ? "Deshabilitado durante la vista previa de otro profesional"
+                  : pushState === "subscribed"
+                  ? "Desactivar notificaciones en este dispositivo"
+                  : "Activar avisos en este dispositivo"
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all ${
+                pushState === "subscribed" && !isImpersonating
+                  ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                  : "bg-zinc-100 border-zinc-300 text-zinc-700 hover:bg-zinc-200"
+              } disabled:opacity-50`}
+            >
+              {pushState === "subscribed" && !isImpersonating ? (
+                <>
+                  <Bell className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Avisos activos</span>
+                </>
+              ) : (
+                <>
+                  <BellOff className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>
+                    {isImpersonating
+                      ? "Vista previa (sin vincular push)"
+                      : "Activar avisos en este dispositivo"}
+                  </span>
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Admin preference: Own agenda alerts vs all team alerts */}
+          {isOwnerAdmin && (
+            <button
+              type="button"
+              onClick={handleToggleNotifyAllStaff}
+              data-testid="admin-notify-scope-btn"
+              title="Elige si deseas recibir alertas solo de tu propia agenda o de todo el equipo"
+              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-bold border transition-all ${
+                notifyAllStaffPref
+                  ? "bg-[#1F1F23] border-[#1F1F23] text-white"
+                  : "bg-zinc-100 border-zinc-300 text-zinc-700 hover:bg-zinc-200"
+              }`}
+            >
+              <span>{notifyAllStaffPref ? "🔔 Avisos: Equipo" : "🔕 Avisos: Solo míos"}</span>
+            </button>
+          )}
+
           {/* Staff selector: Full selector for Owner/Admin, locked badge for Provider */}
           {isOwnerAdmin ? (
             <div className="flex items-center gap-1.5 bg-zinc-100 border border-zinc-300 rounded-full px-3 py-1.5 w-full sm:w-auto">
@@ -2886,6 +3097,22 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
                           >
                             {st.isActive ? "🟢 ACTIVO" : "🏖️ EN VACACIONES"}
                           </span>
+                          {(!st.userId || !linkedUser) && (
+                            <span
+                              data-testid="unlinked-staff-badge"
+                              className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-300"
+                            >
+                              ⚠️ SIN CUENTA VINCULADA PARA AVISOS
+                            </span>
+                          )}
+                          {linkedUser?.pendingStaffUpgrade && (
+                            <span
+                              data-testid="pending-invite-badge"
+                              className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300"
+                            >
+                              ⏳ INVITACIÓN PENDIENTE DE VERIFICAR
+                            </span>
+                          )}
                         </div>
                         <div className="text-xs font-semibold text-zinc-600 mt-0.5">
                           {st.specialtyTitle || st.specialty || "Especialista"}

@@ -7,6 +7,14 @@ import { verifySameOrigin, safeErrorResponse } from "@/lib/api-guard";
 import { normalizeEmail } from "@/lib/validation/input-validators";
 import { emitRealtimeEvent } from "@/lib/realtime-events";
 import {
+  createIdempotentNotificationInTx,
+  resolveStaffRecipientUserIdsInTx,
+} from "@/lib/appointment-lifecycle";
+import {
+  dispatchPendingPushDeliveries,
+  enqueuePushDeliveriesInTx,
+} from "@/lib/web-push";
+import {
   consumeRateLimit,
   getClientIp,
   peekRateLimit,
@@ -276,7 +284,7 @@ export async function POST(req: Request) {
         return NextResponse.json(
           {
             error: `El profesional no se encuentra atendiendo en esta fecha (${
-              fullDayOff.reason || "Periodo de vacaciones o día cerrado"
+              fullDayOff.publicNote || "Periodo de vacaciones o día cerrado"
             }).`,
           },
           { status: 409 }
@@ -396,7 +404,7 @@ export async function POST(req: Request) {
 
     const customerId = user.id;
 
-    // Atomic transaction to prevent double-booking race conditions (TOCTOU)
+    // Atomic transaction to prevent double-booking race conditions (TOCTOU) and persist notifications/push deliveries
     const newAppointment = await prisma.$transaction(async (tx) => {
       const txActiveCount = await tx.appointment.count({
         where: {
@@ -441,7 +449,7 @@ export async function POST(req: Request) {
         );
       }
 
-      return tx.appointment.create({
+      const created = await tx.appointment.create({
         data: {
           customerId,
           staffId: targetStaffId,
@@ -460,16 +468,56 @@ export async function POST(req: Request) {
           customer: { select: { name: true } },
         },
       });
+
+      const staffUserId = created.staff?.userId;
+      if (staffUserId && staffUserId !== customerId) {
+        await createIdempotentNotificationInTx(tx, {
+          userId: staffUserId,
+          appointmentId: created.id,
+          eventKey: `apt:${created.id}:created:v0:user:${staffUserId}`,
+          type: "NEW_APPOINTMENT",
+          title: `Nueva cita a las ${time} (${created.service?.name || "Servicio"})`,
+          message: `${
+            created.customer?.name || "Un cliente"
+          } reservó ${created.service?.name || "un servicio"} para el ${date} a las ${time}.`,
+        });
+      }
+
+      const staffRecipients = await resolveStaffRecipientUserIdsInTx(
+        tx,
+        staffUserId,
+        customerId
+      );
+      if (staffRecipients.length > 0) {
+        await enqueuePushDeliveriesInTx(tx, {
+          eventKey: `apt:${created.id}:created:v0`,
+          eventType: "APPOINTMENT_CREATED",
+          appointmentId: created.id,
+          recipientUserIds: staffRecipients,
+          actorUserId: customerId,
+          title: "Tienes una nueva cita",
+          body: "Se registró una nueva reserva en tu agenda.",
+          targetPath: `/admin?tab=agenda&date=${encodeURIComponent(date)}&appointmentId=${encodeURIComponent(created.id)}`,
+          tag: `apt-new-${created.id}`,
+        });
+      }
+
+      return created;
     });
 
     emitRealtimeEvent({
       type: "APPOINTMENT_CREATED",
       appointmentId: newAppointment.id,
       staffId: newAppointment.staffId,
+      customerId: newAppointment.customerId,
+      actorUserId: customerId,
       customerName: newAppointment.customer?.name || "Cliente",
       serviceName: newAppointment.service?.name || "Servicio",
       startAt: newAppointment.startAt.toISOString(),
+      eventKey: `apt:${newAppointment.id}:created:v0`,
     });
+
+    void dispatchPendingPushDeliveries().catch(() => {});
 
     return NextResponse.json({ ok: true, appointment: newAppointment });
   } catch (error: unknown) {

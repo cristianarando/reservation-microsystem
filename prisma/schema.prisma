@@ -29,23 +29,30 @@ model BusinessSettings {
 }
 
 model User {
-  id             String         @id @default(cuid())
-  googleId       String?        @unique
-  email          String         @unique
-  passwordHash   String?        // Bcrypt-hashed password for secure email login
-  name           String
-  avatarUrl      String?
-  phone          String?        // Required contact phone number
-  role           String         @default("CUSTOMER") // "CUSTOMER" | "PROVIDER" | "ADMIN"
-  isBlocked     Boolean        @default(false)      // Anti-troll lock: blocked due to no-shows
-  noShowCount   Int            @default(0)
-  completedCount Int           @default(0)
-  adminNotes    String?
-  createdAt     DateTime       @default(now())
+  id                   String             @id @default(cuid())
+  googleId             String?            @unique
+  email                String             @unique
+  passwordHash         String?            // Bcrypt-hashed password for secure email login
+  name                 String
+  avatarUrl            String?
+  phone                String?            // Required contact phone number
+  role                 String             @default("CUSTOMER") // "CUSTOMER" | "PROVIDER" | "ADMIN"
+  isBlocked            Boolean            @default(false)      // Anti-troll lock: blocked due to no-shows
+  noShowCount          Int                @default(0)
+  completedCount       Int                @default(0)
+  adminNotes           String?
+  sessionVersion       Int                @default(1)          // Incremented to revoke prior sessions on privilege/credential changes
+  pendingStaffUpgrade  Boolean            @default(false)      // True when a pre-existing customer account is invited as staff pending verification
+  staffInviteTokenHash String?            // SHA-256 hash of pending staff invitation token
+  staffInviteExpiresAt DateTime?          // Expiration timestamp for staff invitation token
+  notifyAllStaff       Boolean            @default(false)      // Explicit ADMIN preference to receive alerts for all staff vs own agenda
+  createdAt            DateTime           @default(now())
 
-  staffProfile  StaffProfile?
-  appointments  Appointment[]
-  notifications Notification[]
+  staffProfile         StaffProfile?
+  appointments         Appointment[]
+  notifications        Notification[]
+  pushSubscriptions    PushSubscription[]
+  pushDeliveries       PushDelivery[]
 }
 
 model StaffProfile {
@@ -101,14 +108,15 @@ model WorkingShift {
 }
 
 model TimeOff {
-  id        String       @id @default(cuid())
-  staffId   String
-  staff     StaffProfile @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  startAt   DateTime
-  endAt     DateTime
-  type      String       @default("CUSTOM_BLOCK") // "LATE_START" | "EARLY_LEAVE" | "FULL_DAY_OFF" | "CUSTOM_BLOCK"
-  reason    String?      // Contextual reason e.g. "Medical Emergency", "Conference"
-  createdAt DateTime     @default(now())
+  id         String       @id @default(cuid())
+  staffId    String
+  staff      StaffProfile @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  startAt    DateTime
+  endAt      DateTime
+  type       String       @default("CUSTOM_BLOCK") // "LATE_START" | "EARLY_LEAVE" | "FULL_DAY_OFF" | "CUSTOM_BLOCK" | "VACATION"
+  reason     String?      // Internal contextual reason e.g. "Medical Emergency", "Conference"
+  publicNote String?      // Optional public-approved message shown to visitors
+  createdAt  DateTime     @default(now())
 
   @@index([staffId, startAt, endAt])
 }
@@ -125,11 +133,14 @@ model Appointment {
   startAt             DateTime
   endAt               DateTime     // startAt + durationMin + bufferAfterMin
   status              String       @default("CONFIRMED") 
-  // Statuses: "CONFIRMED" | "RESCHEDULED_BY_STAFF" | "COMPLETED" | "CANCELLED" | "NO_SHOW"
+  // Statuses: "CONFIRMED" | "RESCHEDULED_BY_STAFF" | "COMPLETED" | "CANCELLED" | "NO_SHOW" | "NO_SHOW_ARCHIVED"
 
   previousStartAt     DateTime?    // Original timestamp if rescheduled by staff
   staffMoveReason     String?      // Operational note explaining rescheduling
   allowFreeCancel     Boolean      @default(false) // Penalty-free cancel if modified by staff
+  rescheduleVersion   Int          @default(0)     // Monotonic counter incremented on each reschedule
+  cancelledBy         String?      // "STAFF" | "CUSTOMER" | "ADMIN"
+  cancelledByUserId   String?      // Actor user ID that performed cancellation
 
   priceSnapshot       Float
   customerNotes       String?
@@ -145,11 +156,64 @@ model Notification {
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   appointmentId String?
+  eventKey      String?  // Deterministic key preventing duplicate internal notifications across retries
   title         String
   message       String
-  type          String   // "APPOINTMENT_MOVED" | "APPOINTMENT_CANCELLED" | "REMINDER"
+  type          String   // "APPOINTMENT_MOVED" | "APPOINTMENT_CANCELLED" | "APPOINTMENT_CANCELLED_BY_CUSTOMER" | "NEW_APPOINTMENT" | "REMINDER"
   isRead        Boolean  @default(false)
   createdAt     DateTime @default(now())
 
   @@index([userId, isRead])
+  @@index([eventKey])
+}
+
+model PushSubscription {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint        String         @unique
+  p256dh          String
+  auth            String
+  userAgent       String?
+  status          String         @default("ACTIVE") // "ACTIVE" | "EXPIRED" | "REVOKED" | "UNSUBSCRIBED"
+  lastConfirmedAt DateTime       @default(now())
+  lastSuccessAt   DateTime?
+  lastErrorCode   String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  deliveries      PushDelivery[]
+
+  @@index([userId, status])
+}
+
+model PushDelivery {
+  id              String           @id @default(cuid())
+  eventKey        String           // Unique logical event identifier per appointment/transition/version
+  eventType       String           // "APPOINTMENT_CREATED" | "APPOINTMENT_CANCELLED" | "MASS_CANCELLATION" | "CUSTOMER_CANCELLED" | "APPOINTMENT_RESCHEDULED"
+  appointmentId   String?
+  notificationId  String?
+  recipientUserId String
+  recipient       User             @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+  subscriptionId  String
+  subscription    PushSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  title           String           // Generic lock-screen safe title
+  body            String           // Generic lock-screen safe body
+  targetPath      String           // Internal relative path opened on click
+  tag             String           // Deduplication tag for Service Worker showNotification
+  status          String           @default("PENDING") // "PENDING" | "PROCESSING" | "DELIVERED" | "FAILED_PERMANENT" | "EXPIRED" | "SKIPPED"
+  attempts        Int              @default(0)
+  maxAttempts     Int              @default(5)
+  nextAttemptAt   DateTime         @default(now())
+  claimedUntil    DateTime?
+  expiresAt       DateTime
+  lastStatusCode  Int?
+  lastError       String?
+  deliveredAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([eventKey, recipientUserId, subscriptionId])
+  @@index([status, nextAttemptAt])
+  @@index([recipientUserId, status])
 }

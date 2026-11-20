@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { safeErrorResponse, verifySameOrigin } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const originErr = verifySameOrigin(req);
+    if (originErr) return originErr;
+
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "No autenticado" }, { status: 401 });
@@ -45,8 +49,7 @@ export async function POST(
     }
 
     return NextResponse.json({ ok: true });
-  } catch (error: any) {
-    console.error("Error marking notification as read:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return safeErrorResponse(error, "No se pudo marcar el aviso como leído.");
   }
 }

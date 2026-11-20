@@ -100,6 +100,8 @@ export async function verifyProviderOwnsStaff(
   return null;
 }
 
+import { randomBytes } from "crypto";
+
 /**
  * Strips credential fields and internal notes before sending User objects to the browser.
  */
@@ -108,17 +110,31 @@ export function sanitizeUserForClient<T extends Record<string, unknown>>(user: T
   delete cleaned.passwordHash;
   delete cleaned.googleId;
   delete cleaned.adminNotes;
+  delete cleaned.staffInviteTokenHash;
+  delete cleaned.staffInviteExpiresAt;
   return cleaned;
 }
 
 /**
- * Logs unexpected server errors internally without leaking database/Prisma traces to clients.
+ * Redacts PII (emails, phones, push endpoints, keys) from technical error messages before logging.
+ */
+export function redactSensitiveLogText(raw: string): string {
+  return raw
+    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[REDACTED_EMAIL]")
+    .replace(/https?:\/\/[^\s"']+/gi, "[REDACTED_PUSH_ENDPOINT]")
+    .replace(/\+?\d[\d\s()-]{6,}\d/g, "[REDACTED_PHONE]");
+}
+
+/**
+ * Logs unexpected server errors internally with a diagnostic errorId without leaking database/Prisma traces or PII to clients.
  */
 export function safeErrorResponse(
   error: unknown,
   fallbackMessage = "Ocurrió un error interno. Intenta nuevamente.",
   status = 500
 ): NextResponse {
-  console.error(`[API Error ${status}]:`, error);
-  return NextResponse.json({ error: fallbackMessage }, { status });
+  const errorId = `err_${randomBytes(4).toString("hex")}`;
+  const rawMsg = error instanceof Error ? error.message : String(error ?? "Unknown error");
+  console.error(`[API Error ${status} | ${errorId}]:`, redactSensitiveLogText(rawMsg));
+  return NextResponse.json({ error: fallbackMessage, errorId }, { status });
 }

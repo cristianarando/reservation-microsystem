@@ -7,11 +7,15 @@ import {
   sanitizeAndSortShifts,
   ShiftItem,
 } from "@/lib/validation/acceptance-criteria";
+import { safeErrorResponse, verifySameOrigin } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
 export async function PUT(req: Request) {
   try {
+    const originErr = verifySameOrigin(req);
+    if (originErr) return originErr;
+
     const user = await getCurrentUser();
     if (!user || (user.role !== "ADMIN" && user.role !== "PROVIDER")) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 });
@@ -27,7 +31,10 @@ export async function PUT(req: Request) {
     } = body;
 
     if (!staffId) {
-      return NextResponse.json({ error: "Falta el parámetro obligatorio staffId" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Falta el parámetro obligatorio staffId" },
+        { status: 400 }
+      );
     }
 
     // Role check: PROVIDER can only edit their own schedule
@@ -58,7 +65,10 @@ export async function PUT(req: Request) {
       const leadTime = Number(customLeadTimeMin);
       if (isNaN(leadTime) || leadTime < 0 || leadTime > 1440) {
         return NextResponse.json(
-          { error: "El margen mínimo de aviso debe estar entre 0 y 1440 minutos (24 horas)." },
+          {
+            error:
+              "El margen mínimo de aviso debe estar entre 0 y 1440 minutos (24 horas).",
+          },
           { status: 400 }
         );
       }
@@ -82,7 +92,8 @@ export async function PUT(req: Request) {
       if (!validationResult.isValid) {
         return NextResponse.json(
           {
-            error: "Los horarios enviados contienen errores o violan los criterios de aceptación.",
+            error:
+              "Los horarios enviados contienen errores o violan los criterios de aceptación.",
             details: validationResult.errors.map((e) => e.message),
           },
           { status: 400 }
@@ -92,43 +103,52 @@ export async function PUT(req: Request) {
       validatedShifts = sanitizeAndSortShifts(rawShifts);
     }
 
-    // Update staff profile preferences
-    await prisma.staffProfile.update({
-      where: { id: staffId },
-      data: {
-        customHorizonDays: customHorizonDays !== undefined ? Number(customHorizonDays) : undefined,
-        customLeadTimeMin: customLeadTimeMin !== undefined ? Number(customLeadTimeMin) : undefined,
-        isActive: isActive !== undefined ? Boolean(isActive) : undefined,
-      },
+    // Update staff profile preferences and working shifts atomically in a single transaction
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.staffProfile.update({
+        where: { id: staffId },
+        data: {
+          customHorizonDays:
+            customHorizonDays !== undefined
+              ? Number(customHorizonDays)
+              : undefined,
+          customLeadTimeMin:
+            customLeadTimeMin !== undefined
+              ? Number(customLeadTimeMin)
+              : undefined,
+          isActive: isActive !== undefined ? Boolean(isActive) : undefined,
+        },
+      });
+
+      if (Array.isArray(shifts)) {
+        await tx.workingShift.deleteMany({ where: { staffId } });
+        if (validatedShifts.length > 0) {
+          await tx.workingShift.createMany({
+            data: validatedShifts.map((s) => ({
+              staffId,
+              dayOfWeek: s.dayOfWeek,
+              startTime: s.startTime,
+              endTime: s.endTime,
+            })),
+          });
+        }
+      }
+
+      return tx.staffProfile.findUnique({
+        where: { id: staffId },
+        include: { workingShifts: true },
+      });
     });
 
-    if (Array.isArray(shifts)) {
-      // Replace existing shifts atomically with validated, sanitized data
-      await prisma.$transaction([
-        prisma.workingShift.deleteMany({ where: { staffId } }),
-        ...(validatedShifts.length > 0
-          ? [
-              prisma.workingShift.createMany({
-                data: validatedShifts.map((s) => ({
-                  staffId,
-                  dayOfWeek: s.dayOfWeek,
-                  startTime: s.startTime,
-                  endTime: s.endTime,
-                })),
-              }),
-            ]
-          : []),
-      ]);
-    }
-
-    const updated = await prisma.staffProfile.findUnique({
-      where: { id: staffId },
-      include: { workingShifts: true },
+    return NextResponse.json({
+      ok: true,
+      staff: updated,
+      effectiveIsActive: updated?.isActive,
     });
-
-    return NextResponse.json({ ok: true, staff: updated });
-  } catch (error: any) {
-    console.error("Shifts update error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return safeErrorResponse(
+      error,
+      "No se pudieron guardar los horarios de atención."
+    );
   }
 }

@@ -78,42 +78,83 @@ export async function GET(req: Request) {
 
     const profile = await userinfoResponse.json();
 
-    if (!profile.email || profile.email_verified === false) {
+    if (
+      !profile ||
+      typeof profile.email !== "string" ||
+      !profile.email.trim() ||
+      profile.email_verified !== true ||
+      typeof profile.sub !== "string" ||
+      !profile.sub.trim()
+    ) {
       return NextResponse.redirect(
         `${baseUrl}${returnTo}?authError=email_not_verified`
       );
     }
 
-    const cleanEmail = profile.email.toLowerCase();
+    const cleanEmail = profile.email.trim().toLowerCase();
+    const googleSub = profile.sub.trim();
 
-    // 3. Link or create user in database
+    // 3. Link or create user in database with strict identity verification
     let user = await prisma.user.findUnique({
-      where: { email: cleanEmail },
+      where: { googleId: googleSub },
     });
 
+    if (!user) {
+      user = await prisma.user.findUnique({
+        where: { email: cleanEmail },
+      });
+    }
+
     if (user) {
+      if (user.googleId && user.googleId !== googleSub) {
+        return NextResponse.redirect(
+          `${baseUrl}${returnTo}?authError=google_account_mismatch`
+        );
+      }
+
+      const isFirstGoogleLink = !user.googleId;
+      const shouldActivatePendingStaff = Boolean(user.pendingStaffUpgrade);
+
       user = await prisma.user.update({
         where: { id: user.id },
         data: {
-          googleId: profile.sub,
+          googleId: googleSub,
           avatarUrl: profile.picture || user.avatarUrl,
           name: user.name || profile.name,
+          // If this account previously had only an unverified local password, clear it
+          // and rotate sessionVersion so any pre-registered unverified session is revoked.
+          ...(isFirstGoogleLink
+            ? {
+                passwordHash: null,
+                sessionVersion: { increment: 1 },
+              }
+            : {}),
+          ...(shouldActivatePendingStaff
+            ? {
+                role: user.role === "ADMIN" ? "ADMIN" : "PROVIDER",
+                pendingStaffUpgrade: false,
+                staffInviteTokenHash: null,
+                staffInviteExpiresAt: null,
+                ...(!isFirstGoogleLink ? { sessionVersion: { increment: 1 } } : {}),
+              }
+            : {}),
         },
       });
     } else {
       user = await prisma.user.create({
         data: {
           email: cleanEmail,
-          googleId: profile.sub,
+          googleId: googleSub,
           name: profile.name || cleanEmail.split("@")[0],
           avatarUrl: profile.picture,
           role: "CUSTOMER",
+          sessionVersion: 1,
         },
       });
     }
 
-    // 4. Issue signed session cookie
-    await setSessionUserId(user.id);
+    // 4. Issue signed session cookie with current sessionVersion
+    await setSessionUserId(user.id, user.sessionVersion);
 
     // 5. Redirect based on role
     if (user.role === "ADMIN" || user.role === "PROVIDER") {

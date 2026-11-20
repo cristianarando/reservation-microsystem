@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx tests/acceptance-criteria.test.ts",
+    "test:security": "tsx tests/security-validators.test.ts",
+    "test:audit": "tsx tests/audit-and-webpush.test.ts",
     "test:e2e": "tsx tests/e2e-full-system.test.ts",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",

@@ -12,12 +12,149 @@ export interface RealtimeEventPayload {
   type: RealtimeEventType;
   appointmentId?: string;
   staffId?: string;
+  customerId?: string;
+  actorUserId?: string;
   customerName?: string;
   serviceName?: string;
   startAt?: string;
   status?: string;
   cancelledBy?: "STAFF" | "CUSTOMER";
+  eventKey?: string;
+  isOwnAgenda?: boolean;
+  suppressAlert?: boolean;
   timestamp?: number;
+}
+
+export interface RealtimeSubscriberContext {
+  userId: string | null;
+  role: string | null;
+  ownStaffId: string | null;
+  notifyAllStaff?: boolean;
+}
+
+/**
+ * Enforces server-side data isolation for SSE subscribers before serializing any event to the wire.
+ * - Unauthenticated visitors only receive a generic `{ type: "SCHEDULE_UPDATED", timestamp }` signal.
+ * - Authenticated customers only receive details for their own appointments; other events become generic `SCHEDULE_UPDATED`.
+ * - Providers only receive events belonging to their own `ownStaffId`; events for other providers return `null`.
+ * - Admins receive full alerts for their own agenda (or all staff if `notifyAllStaff` is enabled) and generic `SCHEDULE_UPDATED` for other staff when `notifyAllStaff` is false.
+ */
+export function filterRealtimeEventForSubscriber(
+  event: RealtimeEventPayload,
+  sub: RealtimeSubscriberContext
+): RealtimeEventPayload | null {
+  const timestamp = event.timestamp ?? Date.now();
+
+  if (event.type === "CONNECTED") {
+    return { type: "CONNECTED", timestamp };
+  }
+
+  // 1. Unauthenticated visitor: emit only generic availability refresh signal (no PII or IDs)
+  if (!sub.userId || !sub.role) {
+    return {
+      type: "SCHEDULE_UPDATED",
+      timestamp,
+    };
+  }
+
+  const isSelfAction = Boolean(event.actorUserId && event.actorUserId === sub.userId);
+
+  // 2. Authenticated CUSTOMER
+  if (sub.role === "CUSTOMER") {
+    if (event.customerId && event.customerId === sub.userId) {
+      return {
+        type: event.type,
+        appointmentId: event.appointmentId,
+        staffId: event.staffId,
+        serviceName: event.serviceName,
+        startAt: event.startAt,
+        status: event.status,
+        cancelledBy: event.cancelledBy,
+        eventKey: event.eventKey,
+        suppressAlert: isSelfAction,
+        timestamp,
+      };
+    }
+    // Event is for another customer or general schedule: only send generic availability signal
+    return {
+      type: "SCHEDULE_UPDATED",
+      timestamp,
+    };
+  }
+
+  // 3. Authenticated PROVIDER (Doctor / Specialist)
+  if (sub.role === "PROVIDER") {
+    if (event.type === "SCHEDULE_UPDATED") {
+      if (!event.staffId || (sub.ownStaffId && event.staffId === sub.ownStaffId)) {
+        return {
+          type: "SCHEDULE_UPDATED",
+          staffId: sub.ownStaffId || undefined,
+          timestamp,
+        };
+      }
+      return null;
+    }
+
+    if (sub.ownStaffId && event.staffId === sub.ownStaffId) {
+      return {
+        type: event.type,
+        appointmentId: event.appointmentId,
+        staffId: event.staffId,
+        customerName: event.customerName,
+        serviceName: event.serviceName,
+        startAt: event.startAt,
+        status: event.status,
+        cancelledBy: event.cancelledBy,
+        eventKey: event.eventKey,
+        isOwnAgenda: true,
+        suppressAlert: isSelfAction,
+        timestamp,
+      };
+    }
+
+    // Do not deliver other doctors' appointment events to this provider
+    return null;
+  }
+
+  // 4. Authenticated ADMIN
+  if (sub.role === "ADMIN") {
+    if (event.type === "SCHEDULE_UPDATED") {
+      return {
+        type: "SCHEDULE_UPDATED",
+        staffId: event.staffId,
+        timestamp,
+      };
+    }
+
+    const isOwnAgenda = Boolean(sub.ownStaffId && event.staffId === sub.ownStaffId);
+    if (isOwnAgenda || sub.notifyAllStaff) {
+      return {
+        type: event.type,
+        appointmentId: event.appointmentId,
+        staffId: event.staffId,
+        customerName: event.customerName,
+        serviceName: event.serviceName,
+        startAt: event.startAt,
+        status: event.status,
+        cancelledBy: event.cancelledBy,
+        eventKey: event.eventKey,
+        isOwnAgenda,
+        suppressAlert: isSelfAction,
+        timestamp,
+      };
+    }
+
+    // Admin team view refreshes on other staff changes without delivering unrequested alerts
+    return {
+      type: "SCHEDULE_UPDATED",
+      staffId: event.staffId,
+      isOwnAgenda: false,
+      suppressAlert: true,
+      timestamp,
+    };
+  }
+
+  return null;
 }
 
 const globalForRealtime = globalThis as unknown as {
@@ -48,7 +185,14 @@ export function subscribeRealtimeEvents(
 ): () => void {
   const emitter = getEmitter();
   emitter.on(CHANNEL, listener);
+  let active = true;
   return () => {
+    if (!active) return;
+    active = false;
     emitter.off(CHANNEL, listener);
   };
+}
+
+export function getRealtimeSubscriberCount(): number {
+  return getEmitter().listenerCount(CHANNEL);
 }
