@@ -525,7 +525,9 @@ export async function POST(req: Request) {
       actorUserId: user.id,
     });
 
-    void dispatchPendingPushDeliveries().catch(() => {});
+    void dispatchPendingPushDeliveries().catch((err) => {
+      console.error("[WebPush] Day override dispatch error:", err);
+    });
 
     return NextResponse.json({
       ok: true,

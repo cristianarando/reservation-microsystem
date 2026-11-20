@@ -151,7 +151,11 @@ export async function resolveStaffRecipientUserIdsInTx(
   const globalAdmins = await tx.user.findMany({
     where: {
       role: "ADMIN",
-      notifyAllStaff: true,
+      OR: [
+        { notifyAllStaff: true },
+        { staffProfile: { is: null } },
+        ...(!staffUserId ? [{}] : []),
+      ],
     },
     select: { id: true },
   });
@@ -180,7 +184,9 @@ export async function cancelAppointmentInTx(
     isMassClosure?: boolean;
   }
 ): Promise<{
-  appointment: any;
+  appointment: Prisma.AppointmentGetPayload<{
+    include: { customer: true; service: true; staff: true };
+  }>;
   alreadyCancelled: boolean;
   realtimeEvent: RealtimeEventPayload | null;
 }> {
@@ -356,6 +362,7 @@ export async function cancelAppointmentInTx(
     status: "CANCELLED",
     cancelledBy: cancelledByTag,
     eventKey: `apt:${current.id}:cancelled:v${current.rescheduleVersion}`,
+    hasLinkedStaffUser: Boolean(current.staff?.userId),
   };
 
   return {

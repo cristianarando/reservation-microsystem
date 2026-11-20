@@ -515,9 +515,12 @@ export async function POST(req: Request) {
       serviceName: newAppointment.service?.name || "Servicio",
       startAt: newAppointment.startAt.toISOString(),
       eventKey: `apt:${newAppointment.id}:created:v0`,
+      hasLinkedStaffUser: Boolean(newAppointment.staff?.userId),
     });
 
-    void dispatchPendingPushDeliveries().catch(() => {});
+    void dispatchPendingPushDeliveries().catch((err) => {
+      console.error("[WebPush] Appointment created dispatch error:", err);
+    });
 
     return NextResponse.json({ ok: true, appointment: newAppointment });
   } catch (error: unknown) {

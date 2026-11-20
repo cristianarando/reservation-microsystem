@@ -81,7 +81,9 @@ export async function POST(
 
     if (result.realtimeEvent) {
       emitRealtimeEvent(result.realtimeEvent);
-      void dispatchPendingPushDeliveries().catch(() => {});
+      void dispatchPendingPushDeliveries().catch((err) => {
+        console.error("[WebPush] Cancel dispatch error:", err);
+      });
     }
 
     return NextResponse.json({

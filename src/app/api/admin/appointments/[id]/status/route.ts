@@ -247,7 +247,9 @@ export async function PUT(
 
     if (result.realtimeEvent) {
       emitRealtimeEvent(result.realtimeEvent);
-      void dispatchPendingPushDeliveries().catch(() => {});
+      void dispatchPendingPushDeliveries().catch((err) => {
+        console.error("[WebPush] Status dispatch error:", err);
+      });
     }
 
     return NextResponse.json({

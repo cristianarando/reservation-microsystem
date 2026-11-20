@@ -1,5 +1,5 @@
 // Service Worker para soporte PWA instalable y notificaciones Web Push (Android / iOS 16.4+ / Chrome Desktop)
-const CACHE_NAME = "reservas-pwa-v2";
+const CACHE_NAME = "reservas-pwa-v3";
 const STATIC_PUBLIC_ASSETS = [
   "/manifest.webmanifest",
   "/favicon.ico",
@@ -111,17 +111,29 @@ self.addEventListener("push", (event) => {
   const targetUrl = sanitizeRelativeUrl(payload.url);
 
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      icon: "/icon/192",
-      badge: "/icon/192",
-      tag,
-      renotify: false,
-      data: {
-        url: targetUrl,
-        eventKey: payload.eventKey || tag,
-      },
-    })
+    self.registration
+      .showNotification(title, {
+        body,
+        icon: "/icon/192",
+        badge: "/icon/192",
+        tag,
+        renotify: true,
+        data: {
+          url: targetUrl,
+          eventKey: payload.eventKey || tag,
+        },
+      })
+      .catch(() =>
+        self.registration.showNotification(title, {
+          body,
+          tag,
+          renotify: true,
+          data: {
+            url: targetUrl,
+            eventKey: payload.eventKey || tag,
+          },
+        })
+      )
   );
 });
 

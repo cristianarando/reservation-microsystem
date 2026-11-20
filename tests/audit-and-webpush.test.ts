@@ -177,6 +177,38 @@ async function runAuditVerification() {
     "P1 #1 (Admin Global Opt-In): Receives full team booking alert when notifyAllStaff=true"
   );
 
+  // Pure Owner Admin (without ownStaffId) receives team booking alerts automatically
+  const pureAdminEvent = filterRealtimeEventForSubscriber(rawBookingEvent, {
+    userId: "user_admin_owner",
+    role: "ADMIN",
+    ownStaffId: null,
+    notifyAllStaff: false,
+  });
+  assert(
+    pureAdminEvent !== null &&
+      pureAdminEvent.type === "APPOINTMENT_CREATED" &&
+      pureAdminEvent.customerName === "Carlos Mendoza" &&
+      pureAdminEvent.suppressAlert === false,
+    "Admin (Pure Owner without personal StaffProfile): Receives full booking alert even when notifyAllStaff=false"
+  );
+
+  // Any Admin receives alert when target StaffProfile has no linked login user
+  const unlinkedDoctorAdminEvent = filterRealtimeEventForSubscriber(
+    { ...rawBookingEvent, hasLinkedStaffUser: false },
+    {
+      userId: "user_admin_alejandro",
+      role: "ADMIN",
+      ownStaffId: "staff_alejandro",
+      notifyAllStaff: false,
+    }
+  );
+  assert(
+    unlinkedDoctorAdminEvent !== null &&
+      unlinkedDoctorAdminEvent.type === "APPOINTMENT_CREATED" &&
+      unlinkedDoctorAdminEvent.suppressAlert === false,
+    "Admin (Unlinked Doctor): Receives full booking alert when doctor profile has no linked user"
+  );
+
   // P2: Idempotent SSE subscriber cleanup
   const baselineListeners = getRealtimeSubscriberCount();
   let receivedCount = 0;

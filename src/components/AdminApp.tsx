@@ -59,6 +59,7 @@ import {
 import {
   detectDevicePushState,
   DevicePushState,
+  sendTestWebPush,
   showDeduplicatedSystemNotification,
   subscribeDeviceToWebPush,
   unsubscribeDeviceFromWebPush,
@@ -669,8 +670,13 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
 
   const [pushState, setPushState] = useState<DevicePushState>("prompt");
   const [pushBusy, setPushBusy] = useState<boolean>(false);
+  const [testingPush, setTestingPush] = useState<boolean>(false);
   const [notifyAllStaffPref, setNotifyAllStaffPref] = useState<boolean>(
     Boolean(currentUser?.notifyAllStaff)
+  );
+  const hasOwnStaffProfile = Boolean(
+    currentUser?.id &&
+      staffList.some((s: any) => s.userId && s.userId === currentUser.id)
   );
   const isImpersonating = Boolean(
     initialData?.impersonatorId &&
@@ -715,10 +721,17 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
         const res = await subscribeDeviceToWebPush();
         setPushState(res.state);
         if (res.ok) {
+          const teamHint =
+            isOwnerAdmin &&
+            hasOwnStaffProfile &&
+            !notifyAllStaffPref &&
+            staffList.length > 1
+              ? " Solo recibirás alertas de tu agenda; pulsa 'Avisos: Equipo' arriba si deseas recibir de todo el personal."
+              : "";
           showToast(
             "success",
             "🔔 Avisos activados",
-            "Recibirás notificaciones en este dispositivo ante nuevas citas o cancelaciones."
+            `Recibirás notificaciones en este dispositivo ante nuevas citas o cancelaciones.${teamHint}`
           );
         } else if (res.error) {
           showToast("warning", "No se pudieron activar avisos", res.error);
@@ -726,6 +739,28 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
       }
     } finally {
       setPushBusy(false);
+    }
+  };
+
+  const handleTestAdminPush = async () => {
+    setTestingPush(true);
+    try {
+      const res = await sendTestWebPush();
+      if (res.ok) {
+        showToast(
+          "success",
+          "Prueba enviada al servidor push",
+          "Chrome debería mostrar la notificación 'Prueba Web Push desde el servidor' en segundos."
+        );
+      } else {
+        showToast(
+          "error",
+          "Fallo en envío Web Push",
+          res.error || "No se pudo completar el envío."
+        );
+      }
+    } finally {
+      setTestingPush(false);
     }
   };
 
@@ -830,7 +865,9 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
             void showDeduplicatedSystemNotification({
               title: "Tienes una nueva cita",
               body: "Se registró una nueva reserva en tu agenda.",
-              tag: ev.eventKey || `apt-new-${ev.appointmentId || Date.now()}`,
+              tag: ev.appointmentId
+                ? `apt-new-${ev.appointmentId}`
+                : ev.eventKey || `apt-new-${Date.now()}`,
               url: "/admin?tab=agenda",
             });
           } else if (
@@ -845,7 +882,9 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
             void showDeduplicatedSystemNotification({
               title: "Se liberó un horario en tu agenda",
               body: "Un cliente canceló su reserva. Revisa tu agenda actualizada.",
-              tag: ev.eventKey || `apt-cust-cancel-${ev.appointmentId || Date.now()}`,
+              tag: ev.appointmentId
+                ? `apt-cust-cancel-${ev.appointmentId}`
+                : ev.eventKey || `apt-cust-cancel-${Date.now()}`,
               url: "/admin?tab=agenda",
             });
           }
@@ -1426,20 +1465,44 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
             )}
           </button>
 
+          {pushState === "subscribed" && !isImpersonating && (
+            <button
+              type="button"
+              disabled={testingPush}
+              onClick={handleTestAdminPush}
+              data-testid="admin-push-test-btn"
+              title="Enviar una notificación Web Push real desde el servidor a este navegador"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-bold border border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50 transition-all disabled:opacity-50"
+            >
+              <span>{testingPush ? "Probando..." : "Probar"}</span>
+            </button>
+          )}
+
           {/* Admin preference: Own agenda alerts vs all team alerts */}
           {isOwnerAdmin && (
             <button
               type="button"
               onClick={handleToggleNotifyAllStaff}
+              disabled={!hasOwnStaffProfile}
               data-testid="admin-notify-scope-btn"
-              title="Elige si deseas recibir alertas solo de tu propia agenda o de todo el equipo"
+              title={
+                hasOwnStaffProfile
+                  ? "Elige si deseas recibir alertas solo de tu propia agenda o de todo el equipo"
+                  : "Como administrador sin agenda propia, recibes alertas de todo el equipo automáticamente"
+              }
               className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-bold border transition-all ${
-                notifyAllStaffPref
+                notifyAllStaffPref || !hasOwnStaffProfile
                   ? "bg-[#1F1F23] border-[#1F1F23] text-white"
                   : "bg-zinc-100 border-zinc-300 text-zinc-700 hover:bg-zinc-200"
               }`}
             >
-              <span>{notifyAllStaffPref ? "🔔 Avisos: Equipo" : "🔕 Avisos: Solo míos"}</span>
+              <span>
+                {!hasOwnStaffProfile
+                  ? "🔔 Avisos: Equipo (auto)"
+                  : notifyAllStaffPref
+                  ? "🔔 Avisos: Equipo"
+                  : "🔕 Avisos: Solo míos"}
+              </span>
             </button>
           )}
 

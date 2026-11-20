@@ -17,7 +17,8 @@ export type PushEventType =
   | "APPOINTMENT_CANCELLED"
   | "MASS_CANCELLATION"
   | "CUSTOMER_CANCELLED"
-  | "APPOINTMENT_RESCHEDULED";
+  | "APPOINTMENT_RESCHEDULED"
+  | "TEST_PUSH";
 
 export interface VapidKeys {
   publicKey: string; // Base64url uncompressed 65-byte P-256 public key
@@ -101,9 +102,18 @@ export function getVapidKeys(): VapidKeys {
   const deterministicPriv = createHash("sha256").update(seedMaterial).digest();
   ecdh.setPrivateKey(deterministicPriv);
 
+  const rawPriv = ecdh.getPrivateKey();
+  const paddedPriv =
+    rawPriv.length === 32
+      ? rawPriv
+      : Buffer.concat([
+          Buffer.alloc(Math.max(0, 32 - rawPriv.length)),
+          rawPriv,
+        ]).subarray(-32);
+
   const keys: VapidKeys = {
     publicKey: ecdh.getPublicKey().toString("base64url"),
-    privateKey: ecdh.getPrivateKey().toString("base64url"),
+    privateKey: paddedPriv.toString("base64url"),
     subject,
   };
   globalForPush.cachedVapidKeys = keys;
@@ -443,6 +453,12 @@ async function defaultHttpPushTransport(
 ): Promise<PushTransportResponse> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
+  let targetOrigin = "push-service";
+  try {
+    targetOrigin = new URL(req.endpoint).origin;
+  } catch {
+    // Ignore malformed origin
+  }
   try {
     const res = await fetch(req.endpoint, {
       method: "POST",
@@ -452,15 +468,31 @@ async function defaultHttpPushTransport(
     });
     const retryAfterHeader = res.headers.get("retry-after");
     const retryAfterSec = retryAfterHeader ? Number(retryAfterHeader) : null;
+    let errorText: string | undefined;
+    if (res.status < 200 || res.status >= 300) {
+      const rawErr = await res.text().catch(() => "");
+      const snippet = rawErr.trim().replace(/\s+/g, " ").slice(0, 220);
+      errorText = snippet
+        ? `Push service HTTP ${res.status}: ${snippet}`
+        : `Push service HTTP ${res.status}`;
+      console.error(
+        `[WebPush] Delivery ${req.deliveryId} failed against ${targetOrigin}: ${errorText}`
+      );
+    }
     return {
       status: res.status,
       retryAfterSec:
         retryAfterSec && Number.isFinite(retryAfterSec) && retryAfterSec > 0
           ? retryAfterSec
           : null,
+      errorText,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Network error";
+    console.error(
+      `[WebPush] Delivery ${req.deliveryId} network failure (${targetOrigin}):`,
+      msg
+    );
     return { status: 0, errorText: msg };
   } finally {
     clearTimeout(timeout);
@@ -507,6 +539,7 @@ export async function dispatchPendingPushDeliveries(options?: {
   now?: Date;
   transport?: PushTransport;
   claimLeaseMs?: number;
+  recipientUserId?: string;
 }): Promise<{
   paused: boolean;
   claimed: number;
@@ -546,6 +579,7 @@ export async function dispatchPendingPushDeliveries(options?: {
   // Find candidate pending or crashed/stale-leased jobs
   const candidates = await prisma.pushDelivery.findMany({
     where: {
+      ...(options?.recipientUserId ? { recipientUserId: options.recipientUserId } : {}),
       OR: [
         {
           status: "PENDING",

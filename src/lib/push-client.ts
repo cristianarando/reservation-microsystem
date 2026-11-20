@@ -20,6 +20,25 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
+function uint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+async function getSwRegistration(): Promise<ServiceWorkerRegistration | undefined> {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return undefined;
+  }
+  return (
+    (await navigator.serviceWorker.getRegistration("/sw.js")) ||
+    (await navigator.serviceWorker.getRegistration("/")) ||
+    undefined
+  );
+}
+
 export function isIosRequiresHomeScreenInstall(): boolean {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
     return false;
@@ -52,7 +71,7 @@ export function isWebPushSupportedInBrowser(): boolean {
 export async function getActivePushEndpoint(): Promise<string | null> {
   if (!isWebPushSupportedInBrowser()) return null;
   try {
-    const reg = await navigator.serviceWorker.getRegistration("/sw.js");
+    const reg = await getSwRegistration();
     if (!reg) return null;
     const sub = await reg.pushManager.getSubscription();
     return sub ? sub.endpoint : null;
@@ -76,7 +95,7 @@ export async function detectDevicePushState(): Promise<DevicePushState> {
     return "denied";
   }
   try {
-    const reg = await navigator.serviceWorker.getRegistration("/sw.js");
+    const reg = await getSwRegistration();
     const sub = await reg?.pushManager.getSubscription();
     if (sub && Notification.permission === "granted") {
       const res = await fetch("/api/push/reconcile", {
@@ -155,11 +174,11 @@ export async function subscribeDeviceToWebPush(): Promise<{
       };
     }
 
-    let reg = await navigator.serviceWorker.getRegistration("/sw.js");
+    let reg = await getSwRegistration();
     if (!reg) {
       reg = await navigator.serviceWorker.register("/sw.js");
     } else {
-      void reg.update().catch(() => {});
+      await reg.update().catch(() => {});
     }
     const readyReg = await navigator.serviceWorker.ready;
 
@@ -175,9 +194,22 @@ export async function subscribeDeviceToWebPush(): Promise<{
       };
     }
 
+    const appServerKey = urlBase64ToUint8Array(keyData.publicKey);
     let sub = await readyReg.pushManager.getSubscription();
+
+    // If an older cached subscription belongs to a different VAPID applicationServerKey, replace it cleanly
+    if (sub) {
+      const existingKeyBuf = sub.options?.applicationServerKey;
+      const matchesServerKey =
+        Boolean(existingKeyBuf) &&
+        uint8ArraysEqual(new Uint8Array(existingKeyBuf as ArrayBuffer), appServerKey);
+      if (!matchesServerKey) {
+        await sub.unsubscribe().catch(() => false);
+        sub = null;
+      }
+    }
+
     if (!sub) {
-      const appServerKey = urlBase64ToUint8Array(keyData.publicKey);
       sub = await readyReg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: appServerKey.buffer as ArrayBuffer,
@@ -246,12 +278,41 @@ export async function unsubscribeDeviceFromWebPush(): Promise<{
   return { ok: true, state: "unsubscribed" };
 }
 
+export async function sendTestWebPush(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  try {
+    const endpoint = await getActivePushEndpoint();
+    const res = await fetch("/api/push/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok) {
+      return {
+        ok: false,
+        error:
+          data?.error ||
+          "El servidor no pudo completar el envío Web Push de prueba.",
+      };
+    }
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      error: "Error de conexión al probar el envío de notificaciones.",
+    };
+  }
+}
+
 export async function closeDisplayedAccountNotifications(): Promise<void> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.getRegistration("/sw.js");
+    const reg = await getSwRegistration();
     if (reg?.active) {
       reg.active.postMessage({ type: "CLOSE_ACCOUNT_NOTIFICATIONS" });
     }
@@ -291,7 +352,7 @@ export async function showDeduplicatedSystemNotification(params: {
 
   try {
     if ("serviceWorker" in navigator) {
-      const reg = await navigator.serviceWorker.getRegistration("/sw.js");
+      const reg = await getSwRegistration();
       if (reg) {
         await reg.showNotification(params.title, {
           body: params.body,

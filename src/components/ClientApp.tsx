@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { WhatsAppIcon } from "./WhatsAppIcon";
 import { ClientFooter } from "./client/ClientFooter";
+import { ToastContainer, ToastItem } from "./ui/ToastContainer";
 import { DEFAULT_BUSINESS_LOGO } from "@/lib/avatars";
 import {
   BranchLocationModal,
@@ -47,6 +48,8 @@ import {
   detectDevicePushState,
   DevicePushState,
   getActivePushEndpoint,
+  sendTestWebPush,
+  showDeduplicatedSystemNotification,
   subscribeDeviceToWebPush,
   unsubscribeDeviceFromWebPush,
 } from "@/lib/push-client";
@@ -157,7 +160,28 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
 
   const [pushState, setPushState] = useState<DevicePushState>("prompt");
   const [pushBusy, setPushBusy] = useState<boolean>(false);
+  const [testingPush, setTestingPush] = useState<boolean>(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const showToast = useCallback(
+    (type: ToastItem["type"], title: string, message?: string) => {
+      const id = Math.random().toString(36).substring(2, 9);
+      setToasts((prev) => [...prev, { id, type, title, message }]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 5000);
+    },
+    []
+  );
+
+  const removeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const latestShowToastRef = useRef(showToast);
+  latestShowToastRef.current = showToast;
+  const seenSseEventKeysRef = useRef<Set<string>>(new Set());
 
   const handleDismissNotification = async (notifId: string, aptId?: string) => {
     const addedIds = [notifId, ...(aptId ? [aptId] : [])];
@@ -362,6 +386,31 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
       }
     } finally {
       setPushBusy(false);
+    }
+  };
+
+  const handleTestDevicePush = async () => {
+    setTestingPush(true);
+    setPushMessage(null);
+    try {
+      const res = await sendTestWebPush();
+      if (res.ok) {
+        latestShowToastRef.current(
+          "success",
+          "Prueba enviada al servidor push",
+          "Chrome debería mostrar la notificación 'Prueba Web Push desde el servidor' en segundos."
+        );
+        setPushMessage("Envío real completado. Si no apareció la ventana de Chrome, revisa los permisos de Chrome en tu sistema.");
+      } else {
+        latestShowToastRef.current(
+          "error",
+          "Fallo al enviar aviso de prueba",
+          res.error || "No se pudo entregar el push."
+        );
+        setPushMessage(res.error || "No se pudo entregar el push de prueba.");
+      }
+    } finally {
+      setTestingPush(false);
     }
   };
 
@@ -607,6 +656,60 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                   if (data) applyAvailabilityPayload(data);
                 })
                 .catch(() => {});
+            }
+
+            if (ev.suppressAlert) return;
+
+            const dedupKey = ev.eventKey
+              ? String(ev.eventKey)
+              : `${ev.type}:${ev.appointmentId || ""}:${ev.timestamp || ""}`;
+            if (seenSseEventKeysRef.current.has(dedupKey)) return;
+            seenSseEventKeysRef.current.add(dedupKey);
+            if (seenSseEventKeysRef.current.size > 100) {
+              const firstKey = seenSseEventKeysRef.current.values().next().value;
+              if (firstKey) seenSseEventKeysRef.current.delete(firstKey);
+            }
+
+            if (
+              ev.type === "APPOINTMENT_CANCELLED" &&
+              ev.cancelledBy === "STAFF"
+            ) {
+              latestShowToastRef.current(
+                "warning",
+                "Tu cita fue cancelada",
+                "El establecimiento canceló tu cita programada. Revisa los detalles en Mis Citas."
+              );
+              const targetUrl = ev.appointmentId
+                ? `/?tab=my-appointments&appointmentId=${encodeURIComponent(ev.appointmentId)}`
+                : "/?tab=my-appointments";
+              void showDeduplicatedSystemNotification({
+                title: "Tu cita fue cancelada",
+                body: "Ingresa a Mis citas para revisar el cambio y reservar un nuevo horario.",
+                tag: ev.appointmentId
+                  ? `apt-cancel-${ev.appointmentId}`
+                  : dedupKey,
+                url: targetUrl,
+              });
+            } else if (
+              ev.type === "APPOINTMENT_UPDATED" &&
+              ev.status === "RESCHEDULED_BY_STAFF"
+            ) {
+              latestShowToastRef.current(
+                "info",
+                "Cambió el horario de tu cita",
+                "El profesional reprogramó tu turno. Revisa y confirma en Mis Citas."
+              );
+              const targetUrl = ev.appointmentId
+                ? `/?tab=my-appointments&appointmentId=${encodeURIComponent(ev.appointmentId)}`
+                : "/?tab=my-appointments";
+              void showDeduplicatedSystemNotification({
+                title: "Cambió el horario de tu cita",
+                body: "Ingresa a Mis citas para confirmar el nuevo horario o cancelar sin penalización.",
+                tag: ev.appointmentId
+                  ? `apt-move-${ev.appointmentId}`
+                  : dedupKey,
+                url: targetUrl,
+              });
             }
           }
         } catch {
@@ -1031,6 +1134,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
 
   return (
     <div className="w-full max-w-md md:max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto min-h-dvh md:min-h-0 md:my-6 md:rounded-[32px] bg-white text-[#1F1F23] pb-16 md:pb-8 shadow-2xl relative border-x md:border border-zinc-200/80 flex flex-col transition-all duration-300">
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
       {/* 1. Business Header (Shown on Step 1 or in My Appointments) */}
       {(activeTab === "my-appointments" || step === 1) && (
         <header className="px-4 sm:px-5 pt-4 sm:pt-5 pb-3.5 md:px-8 md:pt-7 md:pb-5 bg-white border-b border-zinc-100">
@@ -1107,6 +1211,18 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                           : "Activar avisos"}
                       </span>
                     </button>
+                    {pushState === "subscribed" && currentUser && (
+                      <button
+                        type="button"
+                        disabled={testingPush}
+                        onClick={handleTestDevicePush}
+                        data-testid="header-client-push-test-btn"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs whitespace-nowrap disabled:opacity-50"
+                        title="Probar entrega real Web Push desde el servidor"
+                      >
+                        <span>{testingPush ? "Probando..." : "Probar"}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1201,6 +1317,16 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                       : "Activar avisos"}
                   </span>
                 </button>
+                {pushState === "subscribed" && currentUser && (
+                  <button
+                    type="button"
+                    disabled={testingPush}
+                    onClick={handleTestDevicePush}
+                    className="inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 min-h-[34px] rounded-full bg-white text-emerald-800 border border-emerald-200 shadow-2xs whitespace-nowrap disabled:opacity-50"
+                  >
+                    <span>{testingPush ? "Probando..." : "Probar"}</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -2603,6 +2729,18 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                             </span>
                           </>
                         )}
+                      </button>
+                    )}
+                    {currentUser && pushState === "subscribed" && (
+                      <button
+                        type="button"
+                        disabled={testingPush}
+                        onClick={handleTestDevicePush}
+                        data-testid="my-appointments-push-test-btn"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+                        title="Probar entrega real Web Push desde el servidor"
+                      >
+                        <span>{testingPush ? "Probando..." : "Probar"}</span>
                       </button>
                     )}
                     <span className="text-xs text-zinc-400">

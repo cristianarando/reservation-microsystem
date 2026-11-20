@@ -20,6 +20,7 @@ export interface RealtimeEventPayload {
   status?: string;
   cancelledBy?: "STAFF" | "CUSTOMER";
   eventKey?: string;
+  hasLinkedStaffUser?: boolean;
   isOwnAgenda?: boolean;
   suppressAlert?: boolean;
   timestamp?: number;
@@ -127,7 +128,14 @@ export function filterRealtimeEventForSubscriber(
     }
 
     const isOwnAgenda = Boolean(sub.ownStaffId && event.staffId === sub.ownStaffId);
-    if (isOwnAgenda || sub.notifyAllStaff) {
+    const isPureAdminWithoutPersonalAgenda = !sub.ownStaffId;
+    const isUnlinkedStaffEvent = event.hasLinkedStaffUser === false;
+    if (
+      isOwnAgenda ||
+      sub.notifyAllStaff ||
+      isPureAdminWithoutPersonalAgenda ||
+      isUnlinkedStaffEvent
+    ) {
       return {
         type: event.type,
         appointmentId: event.appointmentId,
