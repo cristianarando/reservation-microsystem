@@ -1,24 +1,21 @@
 # Multi-stage Dockerfile for Next.js + Prisma + SQLite on Node 26 (AMD64 & ARM64 / Oracle Cloud Ampere)
 FROM node:26-alpine AS base
-RUN apk add --no-cache libc6-compat openssl tzdata
-
-FROM base AS deps
-WORKDIR /app
-RUN npm install -g pnpm
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY prisma ./prisma
-RUN pnpm install --frozen-lockfile --shamefully-hoist
+RUN apk add --no-cache libc6-compat openssl tzdata && \
+    npm install -g pnpm
 
 FROM base AS builder
 WORKDIR /app
-RUN npm install -g pnpm
-COPY --from=deps /app/node_modules ./node_modules
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY prisma ./prisma
+RUN pnpm install --frozen-lockfile --shamefully-hoist && \
+    npx prisma generate
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npx prisma generate
 RUN pnpm build
 
 FROM base AS runner
+LABEL org.opencontainers.image.source="https://github.com/cristianarando/reservation-microsystem"
+LABEL org.opencontainers.image.description="Reservas App Production Image"
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

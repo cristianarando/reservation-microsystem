@@ -1,5 +1,6 @@
 services:
   reservas-app:
+    image: ${DOCKER_IMAGE:-ghcr.io/cristianarando/reservation-microsystem:latest}
     build:
       context: .
       dockerfile: Dockerfile
