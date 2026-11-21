@@ -11,13 +11,13 @@ export default async function HomePage() {
     redirect("/admin");
   }
 
-  let serializedPublicBootstrap = null;
+  let serializedBootstrap = null;
   try {
-    const publicPayload = await getBootstrapPayload({ publicOnly: true });
-    serializedPublicBootstrap = JSON.parse(JSON.stringify(publicPayload));
+    const payload = await getBootstrapPayload();
+    serializedBootstrap = JSON.parse(JSON.stringify(payload));
   } catch (err) {
-    console.error("SSR public bootstrap fallback:", err);
+    console.error("SSR bootstrap fallback:", err);
   }
 
-  return <HomeClient initialData={serializedPublicBootstrap} />;
+  return <HomeClient initialData={serializedBootstrap} />;
 }

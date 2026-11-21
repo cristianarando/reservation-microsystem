@@ -44,17 +44,10 @@ export function HomeClient({ initialData }: HomeClientProps) {
   }, []);
 
   useEffect(() => {
-    let active = true;
-    void Promise.resolve().then(() => {
-      if (active) {
-        return loadData();
-      }
-      return undefined;
-    });
-    return () => {
-      active = false;
-    };
-  }, [loadData]);
+    if (!initialData) {
+      void loadData();
+    }
+  }, [initialData, loadData]);
 
   // Role Invariant: If authenticated user is a specialist (PROVIDER), their workspace is /admin.
   // Doctors are redirected to the management panel and cannot book appointments as customers.

@@ -1,0 +1,572 @@
+"use client";
+
+import React from "react";
+import { Bell, BellOff, Calendar, Clock, FileText, User } from "lucide-react";
+import { WhatsAppIcon } from "@/components/WhatsAppIcon";
+import {
+  isPastUntickedAppointment,
+  isUpcomingActiveAppointment,
+} from "@/lib/booking-rules";
+import type { DevicePushState } from "@/lib/push-client";
+import type {
+  PortalAppointment,
+  PortalBusinessSettings,
+  PortalUser,
+} from "@/types/portal";
+
+interface ClientMyAppointmentsTabProps {
+  currentUser?: PortalUser | null;
+  settings?: PortalBusinessSettings | null;
+  userAppointments: PortalAppointment[];
+  maxActiveAllowed: number;
+  highlightedAppointmentId: string | null;
+  pushState: DevicePushState;
+  pushBusy: boolean;
+  testingPush: boolean;
+  pushMessage: string | null;
+  showHistory: boolean;
+  historyItems: PortalAppointment[];
+  historyHasMore: boolean;
+  historyTotalCount: number;
+  historyLoadingMore: boolean;
+  historyScrollRef: React.RefObject<HTMLDivElement | null>;
+  historySentinelRef: React.RefObject<HTMLDivElement | null>;
+  onDismissPushMessage: () => void;
+  onTogglePush: () => void;
+  onTestPush: () => void;
+  onToggleHistory: () => void;
+  onLoadMoreHistory: () => void;
+  onOpenAuthModal: () => void;
+  onBookNow: () => void;
+  onAcknowledgeMove: (aptOrId: PortalAppointment | string) => void;
+  onCancelAppointment: (aptId: string) => void;
+  onRepeatService: (apt: PortalAppointment) => void;
+}
+
+export function ClientMyAppointmentsTab({
+  currentUser,
+  settings,
+  userAppointments,
+  maxActiveAllowed,
+  highlightedAppointmentId,
+  pushState,
+  pushBusy,
+  testingPush,
+  pushMessage,
+  showHistory,
+  historyItems,
+  historyHasMore,
+  historyTotalCount,
+  historyLoadingMore,
+  historyScrollRef,
+  historySentinelRef,
+  onDismissPushMessage,
+  onTogglePush,
+  onTestPush,
+  onToggleHistory,
+  onLoadMoreHistory,
+  onOpenAuthModal,
+  onBookNow,
+  onAcknowledgeMove,
+  onCancelAppointment,
+  onRepeatService,
+}: ClientMyAppointmentsTabProps) {
+  const listNow = new Date();
+  const activeApts = userAppointments.filter((a) =>
+    isUpcomingActiveAppointment(a, listNow)
+  );
+  const activeNoShowApts = userAppointments.filter(
+    (a) => a.status === "NO_SHOW"
+  );
+  const historyTotal = Math.max(historyTotalCount, historyItems.length);
+  const staffLabelLower =
+    settings?.staffLabel?.toLowerCase() || "el profesional";
+
+  const renderHistoryCard = (apt: PortalAppointment) => {
+    const variant =
+      apt.status === "NO_SHOW_ARCHIVED"
+        ? {
+            cardClass: "bg-zinc-100 border-zinc-200 text-zinc-600",
+            badgeText: "📁 JUSTIFICADA / ARCHIVADA",
+            badgeClass: "bg-zinc-300 text-zinc-800",
+            borderClass: "border-zinc-200/80",
+            repeatLabel: "📅 Volver a agendar",
+            note: (
+              <div className="mt-1 text-[11px] text-emerald-700 font-semibold">
+                ✓ El consultorio reinició tu contador. Esta falta pasada está archivada y no afecta tu cuenta actual.
+              </div>
+            ),
+          }
+        : apt.status === "COMPLETED"
+        ? {
+            cardClass: "bg-emerald-50/70 border-emerald-200",
+            badgeText: "✓ ATENDIDA",
+            badgeClass: "bg-emerald-700 text-white",
+            borderClass: "border-emerald-200/70",
+            repeatLabel: "📅 Repetir servicio",
+            note: null,
+          }
+        : isPastUntickedAppointment(apt, listNow)
+        ? {
+            cardClass: "bg-zinc-50 border-zinc-200",
+            badgeText: "⏱️ FINALIZADA",
+            badgeClass: "bg-zinc-700 text-white",
+            borderClass: "border-zinc-200/80",
+            repeatLabel: "📅 Repetir servicio",
+            note: (
+              <div className="mt-1 text-[11px] text-zinc-500">
+                Horario pasado — archivada automáticamente sin ocupar tu límite activo.
+              </div>
+            ),
+          }
+        : apt.staffMoveReason
+        ? {
+            cardClass: "bg-amber-50/60 border-amber-200",
+            badgeText: "✕ CANCELADA POR PROFESIONAL",
+            badgeClass: "bg-amber-200 text-amber-900",
+            borderClass: "border-zinc-200/80",
+            repeatLabel: "📅 Volver a agendar",
+            note: (
+              <div className="mt-2 p-2 rounded-xl bg-white/80 border border-amber-200 text-[11px] text-amber-900">
+                <b>Motivo indicado por {staffLabelLower}:</b> &quot;{apt.staffMoveReason}&quot;
+              </div>
+            ),
+          }
+        : {
+            cardClass: "bg-zinc-100 border-zinc-200 text-zinc-600",
+            badgeText: "✕ CANCELADA",
+            badgeClass: "bg-zinc-300 text-zinc-700",
+            borderClass: "border-zinc-200/80",
+            repeatLabel: "📅 Volver a agendar",
+            note: (
+              <div className="mt-1 text-[11px] text-zinc-500 italic">
+                Cancelada a solicitud del cliente.
+              </div>
+            ),
+          };
+
+    return (
+      <div
+        key={apt.id}
+        data-testid="history-appointment-card"
+        className={`p-3.5 rounded-[22px] border text-xs transition-all ${variant.cardClass}`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-bold text-zinc-900">{apt.service?.name}</span>
+          <span
+            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 ${variant.badgeClass}`}
+          >
+            {variant.badgeText}
+          </span>
+        </div>
+
+        <div className="mt-1.5 text-[11px] text-zinc-600 flex items-center gap-1.5 flex-wrap">
+          <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+          <span>
+            {new Date(apt.startAt).toLocaleDateString("es-ES", {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            })}{" "}
+            •{" "}
+            {new Date(apt.startAt).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+          {apt.staff?.displayName && <span>• con {apt.staff.displayName}</span>}
+        </div>
+
+        {variant.note}
+
+        {apt.customerNotes && (
+          <div className="mt-2 p-2 rounded-xl bg-white/75 border border-zinc-200/80 text-[11px] text-zinc-700 flex items-start gap-1.5">
+            <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <span className="font-bold text-zinc-600">Detalle: </span>
+              <span className="break-words">{apt.customerNotes}</span>
+            </div>
+          </div>
+        )}
+
+        <div className={`mt-2.5 pt-2 border-t ${variant.borderClass} flex justify-end`}>
+          <button
+            type="button"
+            onClick={() => onRepeatService(apt)}
+            className="w-full sm:w-auto min-h-[36px] px-4 py-1.5 rounded-full bg-[#1F1F23] text-white font-bold text-xs sm:text-[11px] hover:bg-black transition-all flex items-center justify-center gap-1.5"
+          >
+            <span>{variant.repeatLabel}</span>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="px-5 md:px-8 pt-2 pb-8 space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-base font-bold text-[#1F1F23]">
+          Tus Reservas Activas ({activeApts.length})
+        </h2>
+        <div className="flex items-center gap-2">
+          {currentUser && (
+            <button
+              type="button"
+              disabled={pushBusy}
+              onClick={onTogglePush}
+              data-testid="my-appointments-push-btn"
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                pushState === "subscribed"
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                  : pushState === "insecure_context" || pushState === "denied"
+                  ? "bg-amber-50 border-amber-200 text-amber-800"
+                  : "bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200"
+              } disabled:opacity-50`}
+            >
+              {pushState === "subscribed" ? (
+                <>
+                  <Bell className="w-3 h-3 text-emerald-600" />
+                  <span>Avisos activos</span>
+                </>
+              ) : (
+                <>
+                  <BellOff className="w-3 h-3 text-zinc-500" />
+                  <span>
+                    {pushState === "insecure_context"
+                      ? "Avisos (Requiere HTTPS)"
+                      : pushState === "denied"
+                      ? "Avisos bloqueados"
+                      : "Avísame si cambia mi cita"}
+                  </span>
+                </>
+              )}
+            </button>
+          )}
+          {currentUser && pushState === "subscribed" && (
+            <button
+              type="button"
+              disabled={testingPush}
+              onClick={onTestPush}
+              data-testid="my-appointments-push-test-btn"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+              title="Probar entrega real Web Push desde el servidor"
+            >
+              <span>{testingPush ? "Probando..." : "Probar"}</span>
+            </button>
+          )}
+          <span className="text-xs text-zinc-400">
+            Máx. {maxActiveAllowed} activas
+          </span>
+        </div>
+      </div>
+
+      {pushMessage && currentUser && (
+        <div className="p-3 rounded-2xl bg-zinc-50 border border-zinc-200 text-[11px] text-zinc-700 flex items-center justify-between gap-2">
+          <span>{pushMessage}</span>
+          <button
+            type="button"
+            onClick={onDismissPushMessage}
+            className="text-zinc-400 hover:text-zinc-700 font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {!currentUser ? (
+        <div className="py-8 px-4 text-center text-xs bg-zinc-50 rounded-3xl border border-zinc-200 space-y-2">
+          <User className="w-8 h-8 mx-auto text-zinc-400" />
+          <p className="font-semibold text-zinc-800 text-sm">
+            Consulta tus reservas activas
+          </p>
+          <p className="text-[11px] text-zinc-500 max-w-xs mx-auto">
+            Ingresa tu correo para ver tus citas agendadas y gestionar cancelaciones o reprogramaciones.
+          </p>
+          <button
+            onClick={onOpenAuthModal}
+            className="mt-3 px-5 py-2.5 rounded-full bg-[#1F1F23] text-white text-xs font-semibold hover:bg-black transition-all"
+          >
+            Ingresar con mi Correo
+          </button>
+        </div>
+      ) : (
+        <>
+          {activeApts.length === 0 && activeNoShowApts.length === 0 && (
+            <div className="py-8 text-center text-xs text-zinc-400 bg-zinc-50 rounded-3xl border border-zinc-200">
+              <Calendar className="w-8 h-8 mx-auto text-zinc-300 mb-2" />
+              <p className="font-semibold text-zinc-700">
+                No tienes citas próximas pendientes
+              </p>
+              <p className="text-[11px] text-zinc-500 mt-0.5">
+                Tu cuenta está al día (0 faltas activas).
+              </p>
+              <button
+                onClick={onBookNow}
+                className="mt-4 px-5 py-2.5 rounded-full bg-[#1F1F23] text-white text-xs font-semibold"
+              >
+                Reservar Ahora
+              </button>
+            </div>
+          )}
+
+          {activeApts.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {activeApts.map((apt) => {
+                const isPast = new Date(apt.endAt || apt.startAt) <= listNow;
+                const isRescheduled = apt.status === "RESCHEDULED_BY_STAFF";
+                const isHighlighted = highlightedAppointmentId === apt.id;
+
+                return (
+                  <div
+                    key={apt.id}
+                    data-appointment-id={apt.id}
+                    className={`p-4 rounded-[26px] border transition-all ${
+                      isRescheduled
+                        ? "bg-amber-50 border-amber-300"
+                        : "bg-[#F4F4F6] border-zinc-200"
+                    } ${isHighlighted ? "ring-2 ring-[#1F1F23] shadow-md" : ""}`}
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-zinc-900 text-sm">
+                        {apt.service?.name}
+                      </span>
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                          isRescheduled
+                            ? "bg-amber-500 text-white"
+                            : "bg-[#1F1F23] text-white"
+                        }`}
+                      >
+                        {isRescheduled ? "MODIFICADA" : "CONFIRMADA"}
+                      </span>
+                    </div>
+
+                    <div className="mt-2.5 text-xs text-zinc-600 space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>
+                          {new Date(apt.startAt).toLocaleDateString("es-ES", {
+                            weekday: "long",
+                            day: "numeric",
+                            month: "long",
+                          })}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-zinc-400" />
+                        <span className="font-semibold text-zinc-900">
+                          {new Date(apt.startAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}{" "}
+                          ({apt.service?.durationMin} min)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>
+                          {settings?.staffLabel || "Profesional"}:{" "}
+                          <b>{apt.staff?.displayName}</b>
+                        </span>
+                      </div>
+                    </div>
+
+                    {apt.customerNotes && (
+                      <div className="mt-2.5 p-2.5 rounded-2xl bg-white/85 border border-zinc-200/80 text-xs text-zinc-700 flex items-start gap-2">
+                        <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block">
+                            Tu nota / detalle:
+                          </span>
+                          <p className="text-xs text-zinc-800 break-words leading-snug mt-0.5">
+                            {apt.customerNotes}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {!isPast && (
+                      <div className="mt-3 pt-2.5 border-t border-zinc-200 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3">
+                          {isRescheduled && (
+                            <button
+                              type="button"
+                              onClick={() => onAcknowledgeMove(apt)}
+                              className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded-full transition-all"
+                            >
+                              ✓ Confirmar horario
+                            </button>
+                          )}
+                          {apt.canCancel ? (
+                            <button
+                              onClick={() => onCancelAppointment(apt.id)}
+                              className="text-xs text-red-600 font-bold hover:underline"
+                            >
+                              {apt.isFreeCancellationBecauseOfStaff
+                                ? "Cancelar sin penalización"
+                                : "Cancelar cita"}
+                            </button>
+                          ) : (
+                            <span className="text-xs text-zinc-400">
+                              No cancelable ({settings?.minCancelNoticeHours}h mín.)
+                            </span>
+                          )}
+                        </div>
+
+                        {settings?.phoneWhatsapp && (
+                          <a
+                            href={`https://wa.me/${settings.phoneWhatsapp.replace(/\D/g, "")}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs font-bold text-[#1F1F23] flex items-center gap-1 hover:underline"
+                          >
+                            <WhatsAppIcon className="w-4 h-4 text-[#16A34A]" />
+                            <span>WhatsApp</span>
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {activeNoShowApts.length > 0 && (
+            <div className="space-y-2.5 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">
+                  Inasistencias vigentes (Ciclo actual):
+                </span>
+                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                  {activeNoShowApts.length} de 2 permitidas
+                </span>
+              </div>
+
+              {activeNoShowApts.map((apt, idx: number) => (
+                <div
+                  key={apt.id}
+                  className="p-4 rounded-[26px] bg-amber-50 border border-amber-300 text-xs shadow-sm"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-zinc-900 text-sm">
+                      {apt.service?.name}
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-600 text-white">
+                      ⚠️ FALTA ACTIVA ({idx + 1}/2)
+                    </span>
+                  </div>
+                  <div className="mt-2 text-zinc-700">
+                    📅{" "}
+                    {new Date(apt.startAt).toLocaleDateString("es-ES", {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                    })}{" "}
+                    a las{" "}
+                    <b>
+                      {new Date(apt.startAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </b>{" "}
+                    con {apt.staff?.displayName}
+                  </div>
+                  {apt.customerNotes && (
+                    <div className="mt-2 p-2 rounded-xl bg-white/85 border border-amber-200 text-[11px] text-zinc-700 break-words">
+                      <b>Tu nota / detalle:</b> {apt.customerNotes}
+                    </div>
+                  )}
+                  <p className="text-[11px] text-amber-800 mt-1 font-medium">
+                    Esta falta contabiliza para el bloqueo automático. Si fue justificable, contáctanos por WhatsApp para archivarla y reiniciar tu contador.
+                  </p>
+                  {settings?.phoneWhatsapp && (
+                    <div className="mt-3 pt-2 border-t border-amber-200 flex justify-end">
+                      <a
+                        href={`https://wa.me/${settings.phoneWhatsapp.replace(/\D/g, "")}?text=Hola,%20tuve%20un%20inconveniente%20justificable%20en%20mi%20cita%20y%20quisiera%20regularizar%20mi%20cuenta.`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3.5 py-1.5 rounded-full bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 flex items-center gap-1"
+                      >
+                        <WhatsAppIcon className="w-3.5 h-3.5" />
+                        <span>Justificar por WhatsApp</span>
+                      </a>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {historyTotal > 0 && (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={onToggleHistory}
+                className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-zinc-100 hover:bg-zinc-200/80 border border-zinc-200 text-xs font-bold text-zinc-700 flex items-center justify-between gap-3 text-left transition-all"
+              >
+                <span className="min-w-0 leading-snug">
+                  📂 Historial de citas pasadas y archivo ({historyTotal})
+                </span>
+                <span className="text-[11px] text-zinc-500 whitespace-nowrap shrink-0">
+                  {showHistory ? "Ocultar ▲" : "Ver historial ▼"}
+                </span>
+              </button>
+
+              {showHistory && (
+                <div className="space-y-3 pt-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-500 px-1">
+                    <span>
+                      Mostrando <b>{historyItems.length}</b> de{" "}
+                      <b>{historyTotal}</b> citas
+                    </span>
+                    {historyHasMore && (
+                      <span>Desliza hacia abajo para cargar más ↓</span>
+                    )}
+                  </div>
+
+                  <div
+                    ref={historyScrollRef}
+                    data-testid="history-scroll-container"
+                    className="max-h-[360px] overflow-y-auto pr-1 space-y-3 rounded-2xl"
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      {historyItems.map((apt) => renderHistoryCard(apt))}
+                    </div>
+
+                    <div
+                      ref={historySentinelRef}
+                      className="pt-1 pb-2 flex flex-col items-center gap-2"
+                    >
+                      {historyLoadingMore ? (
+                        <div className="flex items-center gap-2 py-2.5 text-xs font-semibold text-zinc-600">
+                          <span className="w-4 h-4 border-2 border-[#1F1F23] border-t-transparent rounded-full animate-spin" />
+                          <span>Cargando citas anteriores...</span>
+                        </div>
+                      ) : historyHasMore ? (
+                        <button
+                          type="button"
+                          onClick={onLoadMoreHistory}
+                          className="px-4 py-2 rounded-full bg-zinc-100 hover:bg-zinc-200 border border-zinc-300 text-xs font-bold text-[#1F1F23] transition-all"
+                        >
+                          Cargar más historial (quedan{" "}
+                          {Math.max(historyTotal - historyItems.length, 1)})
+                        </button>
+                      ) : (
+                        historyItems.length > 6 && (
+                          <div className="text-[11px] text-zinc-400 font-medium py-1">
+                            ✓ Has llegado al final de tu historial ({historyTotal} citas)
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
