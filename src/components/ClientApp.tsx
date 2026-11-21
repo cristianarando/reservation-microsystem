@@ -538,21 +538,47 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
             if (firstKey) seenSseEventKeysRef.current.delete(firstKey);
           }
 
+          const timeLabel = ev.startAt
+            ? new Date(ev.startAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "";
+          const dateLabel = ev.startAt
+            ? new Date(ev.startAt).toLocaleDateString("es-ES", {
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+              })
+            : "";
+          const oldTimeLabel = ev.previousStartAt
+            ? new Date(ev.previousStartAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "";
+
           if (
             ev.type === "APPOINTMENT_CANCELLED" &&
             ev.cancelledBy === "STAFF"
           ) {
-            latestShowToastRef.current(
-              "warning",
-              "Tu cita fue cancelada",
-              "El establecimiento canceló tu cita programada. Revisa los detalles en Mis Citas."
-            );
+            const title = `⚠️ Cita cancelada: ${
+              ev.serviceName || "Tu reserva"
+            }${timeLabel ? ` (${timeLabel})` : ""}`;
+            const body = `${
+              ev.staffName || "El establecimiento"
+            } canceló tu cita de ${ev.serviceName || "servicio"}${
+              dateLabel ? ` del ${dateLabel}` : ""
+            }${timeLabel ? ` a las ${timeLabel}` : ""}${
+              ev.reason ? `. Motivo: "${ev.reason}"` : ""
+            }. Revisa Mis Citas para elegir otro horario.`;
+            latestShowToastRef.current("warning", title, body);
             const targetUrl = ev.appointmentId
               ? `/?tab=my-appointments&appointmentId=${encodeURIComponent(ev.appointmentId)}`
               : "/?tab=my-appointments";
             void showDeduplicatedSystemNotification({
-              title: "Tu cita fue cancelada",
-              body: "Ingresa a Mis citas para revisar el cambio y reservar un nuevo horario.",
+              title,
+              body,
               tag: ev.appointmentId
                 ? `apt-cancel-${ev.appointmentId}`
                 : dedupKey,
@@ -562,17 +588,25 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
             ev.type === "APPOINTMENT_UPDATED" &&
             ev.status === "RESCHEDULED_BY_STAFF"
           ) {
-            latestShowToastRef.current(
-              "info",
-              "Cambió el horario de tu cita",
-              "El profesional reprogramó tu turno. Revisa y confirma en Mis Citas."
-            );
+            const title = `🕒 Nuevo horario: ${ev.serviceName || "Tu cita"}${
+              timeLabel ? ` (${timeLabel})` : ""
+            }`;
+            const body = `${
+              ev.staffName || "El profesional"
+            } reprogramó tu cita de ${ev.serviceName || "servicio"}${
+              oldTimeLabel ? ` (antes ${oldTimeLabel})` : ""
+            }${dateLabel ? ` para el ${dateLabel}` : ""}${
+              timeLabel ? ` a las ${timeLabel}` : ""
+            }${
+              ev.reason ? ` por "${ev.reason}"` : ""
+            }. Confirma o reagenda en Mis Citas.`;
+            latestShowToastRef.current("info", title, body);
             const targetUrl = ev.appointmentId
               ? `/?tab=my-appointments&appointmentId=${encodeURIComponent(ev.appointmentId)}`
               : "/?tab=my-appointments";
             void showDeduplicatedSystemNotification({
-              title: "Cambió el horario de tu cita",
-              body: "Ingresa a Mis citas para confirmar el nuevo horario o cancelar sin penalización.",
+              title,
+              body,
               tag: ev.appointmentId
                 ? `apt-move-${ev.appointmentId}`
                 : dedupKey,

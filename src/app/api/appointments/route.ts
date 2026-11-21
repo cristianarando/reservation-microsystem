@@ -469,6 +469,18 @@ export async function POST(req: Request) {
         },
       });
 
+      const customerLabel = created.customer?.name || "Un cliente";
+      const serviceLabel = created.service?.name || "Servicio";
+      const staffLabel = created.staff?.displayName || "Profesional";
+      const dateFormatted = startAt.toLocaleDateString("es-ES", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      });
+      const noteSnippet = created.customerNotes
+        ? ` • Nota: "${created.customerNotes.slice(0, 60)}"`
+        : "";
+
       const staffUserId = created.staff?.userId;
       if (staffUserId && staffUserId !== customerId) {
         await createIdempotentNotificationInTx(tx, {
@@ -476,10 +488,8 @@ export async function POST(req: Request) {
           appointmentId: created.id,
           eventKey: `apt:${created.id}:created:v0:user:${staffUserId}`,
           type: "NEW_APPOINTMENT",
-          title: `Nueva cita a las ${time} (${created.service?.name || "Servicio"})`,
-          message: `${
-            created.customer?.name || "Un cliente"
-          } reservó ${created.service?.name || "un servicio"} para el ${date} a las ${time}.`,
+          title: `Nueva cita a las ${time} (${serviceLabel})`,
+          message: `${customerLabel} reservó ${serviceLabel} para el ${date} a las ${time}.`,
         });
       }
 
@@ -495,8 +505,8 @@ export async function POST(req: Request) {
           appointmentId: created.id,
           recipientUserIds: staffRecipients,
           actorUserId: customerId,
-          title: "Tienes una nueva cita",
-          body: "Se registró una nueva reserva en tu agenda.",
+          title: `📅 Nueva cita: ${serviceLabel} (${time})`,
+          body: `${customerLabel} agendó ${serviceLabel} con ${staffLabel} para el ${dateFormatted} a las ${time}.${noteSnippet}`,
           targetPath: `/admin?tab=agenda&date=${encodeURIComponent(date)}&appointmentId=${encodeURIComponent(created.id)}`,
           tag: `apt-new-${created.id}`,
         });
@@ -513,6 +523,8 @@ export async function POST(req: Request) {
       actorUserId: customerId,
       customerName: newAppointment.customer?.name || "Cliente",
       serviceName: newAppointment.service?.name || "Servicio",
+      staffName: newAppointment.staff?.displayName || "Profesional",
+      reason: newAppointment.customerNotes || undefined,
       startAt: newAppointment.startAt.toISOString(),
       eventKey: `apt:${newAppointment.id}:created:v0`,
       hasLinkedStaffUser: Boolean(newAppointment.staff?.userId),

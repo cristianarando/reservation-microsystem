@@ -86,6 +86,17 @@ export async function POST(req: Request) {
       );
     }
 
+    const settings = await prisma.businessSettings.findFirst({
+      where: { id: 1 },
+      select: { name: true },
+    });
+    const roleLabel =
+      user.role === "ADMIN"
+        ? "Administrador"
+        : user.role === "PROVIDER"
+        ? "Profesional"
+        : "Cliente";
+
     const eventKey = `test:${user.id}:${Date.now()}:${Math.random()
       .toString(36)
       .slice(2, 7)}`;
@@ -98,8 +109,10 @@ export async function POST(req: Request) {
         eventType: "TEST_PUSH",
         recipientUserIds: [user.id],
         actorUserId: null,
-        title: "🔔 Prueba Web Push desde el servidor",
-        body: "Conexión real con el servicio push verificada correctamente.",
+        title: `🔔 Avisos activos • ${settings?.name || "Reservas"}`,
+        body: `Hola ${
+          user.name || "usuario"
+        }, las notificaciones para tu cuenta de ${roleLabel} funcionan correctamente en este dispositivo.`,
         targetPath,
         tag: `reservas-test-push-${Date.now()}`,
         ttlSeconds: 300,

@@ -375,6 +375,24 @@ export async function POST(req: Request) {
               );
             }
 
+            const oldStartDate = new Date(apt.startAt);
+            const oldTimeStr = oldStartDate.toLocaleTimeString("es-ES", {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            const newTimeStr = newStart.toLocaleTimeString("es-ES", {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            const newDateStr = newStart.toLocaleDateString("es-ES", {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            });
+            const serviceLabel = apt.service?.name || "Servicio";
+            const staffLabel = apt.staff?.displayName || "el profesional";
+            const reasonLabel = cleanInternalReason || "Imprevisto de agenda";
+
             const moveEventKey = `apt:${apt.id}:moved:v${nextVersion}`;
             const notif = await createIdempotentNotificationInTx(tx, {
               userId: apt.customerId,
@@ -382,12 +400,7 @@ export async function POST(req: Request) {
               eventKey: `${moveEventKey}:user:${apt.customerId}`,
               type: "APPOINTMENT_MOVED",
               title: "Tu cita fue reprogramada por el profesional",
-              message: `El ${apt.staff.displayName} reprogramó tu cita para el ${newStart.toLocaleDateString()} a las ${newStart.toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })} (${
-                cleanInternalReason || "Imprevisto"
-              }). Puedes confirmarla o cancelarla sin penalización.`,
+              message: `${staffLabel} reprogramó tu cita de ${serviceLabel} para el ${newDateStr} a las ${newTimeStr} (${reasonLabel}). Puedes confirmarla o cancelarla sin penalización.`,
             });
 
             await enqueuePushDeliveriesInTx(tx, {
@@ -397,8 +410,8 @@ export async function POST(req: Request) {
               notificationId: notif.id,
               recipientUserIds: [apt.customerId],
               actorUserId: user.id,
-              title: "Cambió el horario de tu cita",
-              body: "Ingresa a Mis citas para confirmar el nuevo horario o cancelar sin penalización.",
+              title: `🕒 Nuevo horario: ${serviceLabel} (${newTimeStr})`,
+              body: `${staffLabel} reprogramó tu cita de ${serviceLabel} (antes ${oldTimeStr}) para el ${newDateStr} a las ${newTimeStr} por "${reasonLabel}". Toca para confirmar o cancelar sin cargo.`,
               targetPath: `/?tab=my-appointments&appointmentId=${encodeURIComponent(apt.id)}`,
               tag: `apt-move-${apt.id}`,
             });
@@ -409,6 +422,10 @@ export async function POST(req: Request) {
               staffId: apt.staffId,
               customerId: apt.customerId,
               actorUserId: user.id,
+              serviceName: serviceLabel,
+              staffName: staffLabel,
+              previousStartAt: oldStartDate.toISOString(),
+              reason: reasonLabel,
               status: "RESCHEDULED_BY_STAFF",
               startAt: newStart.toISOString(),
               eventKey: moveEventKey,
@@ -416,7 +433,7 @@ export async function POST(req: Request) {
           }
         }
       } else if (conflicting.length > 0 && resolution === "CANCEL_ALL") {
-        const affectedCustomerAppointments = new Map<string, string[]>();
+        const affectedCustomerApts = new Map<string, typeof conflicting>();
 
         for (const apt of conflicting) {
           const cancelRes = await cancelAppointmentInTx(tx, {
@@ -429,14 +446,15 @@ export async function POST(req: Request) {
             emittedEvents.push(cancelRes.realtimeEvent);
           }
           if (!cancelRes.alreadyCancelled) {
-            const list = affectedCustomerAppointments.get(apt.customerId) || [];
-            list.push(apt.id);
-            affectedCustomerAppointments.set(apt.customerId, list);
+            const list = affectedCustomerApts.get(apt.customerId) || [];
+            list.push(apt);
+            affectedCustomerApts.set(apt.customerId, list);
           }
         }
 
         // Enqueue one consolidated Web Push notification per affected customer for this mass closure
-        for (const [custId, aptIds] of affectedCustomerAppointments.entries()) {
+        for (const [custId, apts] of affectedCustomerApts.entries()) {
+          const aptIds = apts.map((a) => a.id);
           const sortedIdsKey = [...aptIds].sort().join(",");
           const massEventKey = `mass_cancel:${sortedIdsKey}:user:${custId}`;
           const targetPath =
@@ -444,17 +462,44 @@ export async function POST(req: Request) {
               ? `/?tab=my-appointments&appointmentId=${encodeURIComponent(aptIds[0])}`
               : "/?tab=my-appointments";
 
+          let pushTitle: string;
+          let pushBody: string;
+          if (apts.length === 1) {
+            const apt0 = apts[0];
+            const apt0Date = new Date(apt0.startAt);
+            const time0 = apt0Date.toLocaleTimeString("es-ES", {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            const date0 = apt0Date.toLocaleDateString("es-ES", {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            });
+            const service0 = apt0.service?.name || "Servicio";
+            const staff0 = apt0.staff?.displayName || "El profesional";
+            pushTitle = `⚠️ Cita cancelada: ${service0} (${time0})`;
+            pushBody = `${staff0} canceló tu cita de ${service0} del ${date0} a las ${time0}. Motivo: "${
+              cleanInternalReason || "Imprevisto de agenda"
+            }". Toca para reagendar.`;
+          } else {
+            const serviceNames = apts
+              .map((a) => a.service?.name || "Servicio")
+              .join(", ");
+            pushTitle = `⚠️ ${apts.length} citas canceladas en tu agenda`;
+            pushBody = `Se cancelaron tus citas (${serviceNames}) por "${
+              cleanInternalReason || "Cierre de agenda"
+            }". Toca para elegir nuevos horarios.`;
+          }
+
           await enqueuePushDeliveriesInTx(tx, {
             eventKey: massEventKey,
             eventType: "MASS_CANCELLATION",
             appointmentId: aptIds[0] || null,
             recipientUserIds: [custId],
             actorUserId: user.id,
-            title:
-              aptIds.length === 1
-                ? "Tu cita fue cancelada"
-                : "Hay cambios en tus citas",
-            body: "Ingresa a Mis citas para revisar las actualizaciones en tu agenda.",
+            title: pushTitle,
+            body: pushBody,
             targetPath,
             tag: `mass-cancel-${custId}-${startDate.getTime()}`,
           });

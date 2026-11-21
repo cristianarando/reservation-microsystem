@@ -16,7 +16,10 @@ export interface RealtimeEventPayload {
   actorUserId?: string;
   customerName?: string;
   serviceName?: string;
+  staffName?: string;
   startAt?: string;
+  previousStartAt?: string;
+  reason?: string;
   status?: string;
   cancelledBy?: "STAFF" | "CUSTOMER";
   eventKey?: string;
@@ -68,7 +71,10 @@ export function filterRealtimeEventForSubscriber(
         appointmentId: event.appointmentId,
         staffId: event.staffId,
         serviceName: event.serviceName,
+        staffName: event.staffName,
         startAt: event.startAt,
+        previousStartAt: event.previousStartAt,
+        reason: event.reason,
         status: event.status,
         cancelledBy: event.cancelledBy,
         eventKey: event.eventKey,
@@ -103,7 +109,10 @@ export function filterRealtimeEventForSubscriber(
         staffId: event.staffId,
         customerName: event.customerName,
         serviceName: event.serviceName,
+        staffName: event.staffName,
         startAt: event.startAt,
+        previousStartAt: event.previousStartAt,
+        reason: event.reason,
         status: event.status,
         cancelledBy: event.cancelledBy,
         eventKey: event.eventKey,
@@ -142,7 +151,10 @@ export function filterRealtimeEventForSubscriber(
         staffId: event.staffId,
         customerName: event.customerName,
         serviceName: event.serviceName,
+        staffName: event.staffName,
         startAt: event.startAt,
+        previousStartAt: event.previousStartAt,
+        reason: event.reason,
         status: event.status,
         cancelledBy: event.cancelledBy,
         eventKey: event.eventKey,

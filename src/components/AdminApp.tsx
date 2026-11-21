@@ -359,23 +359,33 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
           latestOnRefreshRef.current();
           if (ev.suppressAlert) return;
 
+          const timeLabel = ev.startAt
+            ? new Date(ev.startAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "";
+          const dateLabel = ev.startAt
+            ? new Date(ev.startAt).toLocaleDateString("es-ES", {
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+              })
+            : "";
+
           if (ev.type === "APPOINTMENT_CREATED") {
-            const timeLabel = ev.startAt
-              ? new Date(ev.startAt).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : "";
-            latestShowToastRef.current(
-              "info",
-              "🔔 ¡Nueva cita registrada!",
-              `${ev.customerName || "Un cliente"} agendó ${
-                ev.serviceName || "un servicio"
-              }${timeLabel ? ` a las ${timeLabel}` : ""}.`
-            );
+            const title = `📅 Nueva cita: ${ev.serviceName || "Servicio"}${
+              timeLabel ? ` (${timeLabel})` : ""
+            }`;
+            const body = `${ev.customerName || "Un cliente"} agendó ${
+              ev.serviceName || "un servicio"
+            }${ev.staffName ? ` con ${ev.staffName}` : ""}${
+              dateLabel ? ` para el ${dateLabel}` : ""
+            }${timeLabel ? ` a las ${timeLabel}` : ""}.`;
+            latestShowToastRef.current("info", title, body);
             void showDeduplicatedSystemNotification({
-              title: "Tienes una nueva cita",
-              body: "Se registró una nueva reserva en tu agenda.",
+              title,
+              body,
               tag: ev.appointmentId
                 ? `apt-new-${ev.appointmentId}`
                 : ev.eventKey || `apt-new-${Date.now()}`,
@@ -385,14 +395,18 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
             ev.type === "APPOINTMENT_CANCELLED" &&
             ev.cancelledBy === "CUSTOMER"
           ) {
-            latestShowToastRef.current(
-              "warning",
-              "Cita cancelada por el cliente",
-              "El horario ha quedado libre nuevamente en tu agenda."
-            );
+            const title = `🔓 Cita cancelada: ${ev.serviceName || "Servicio"}${
+              timeLabel ? ` (${timeLabel})` : ""
+            }`;
+            const body = `${
+              ev.customerName || "Un cliente"
+            } canceló su cita de ${ev.serviceName || "servicio"}${
+              dateLabel ? ` del ${dateLabel}` : ""
+            }${timeLabel ? ` a las ${timeLabel}` : ""}. El horario quedó libre.`;
+            latestShowToastRef.current("warning", title, body);
             void showDeduplicatedSystemNotification({
-              title: "Se liberó un horario en tu agenda",
-              body: "Un cliente canceló su reserva. Revisa tu agenda actualizada.",
+              title,
+              body,
               tag: ev.appointmentId
                 ? `apt-cust-cancel-${ev.appointmentId}`
                 : ev.eventKey || `apt-cust-cancel-${Date.now()}`,

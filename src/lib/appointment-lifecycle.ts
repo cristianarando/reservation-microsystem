@@ -267,9 +267,15 @@ export async function cancelAppointmentInTx(
     day: "numeric",
     month: "short",
   });
+  const dateShort = aptDate.toLocaleDateString("es-ES", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
   const dateYmd = formatLocalDateYYYYMMDD(aptDate);
   const serviceName = current.service?.name || "Servicio";
   const staffName = current.staff?.displayName || "el profesional";
+  const customerName = current.customer?.name || "Un cliente";
 
   if (isStaffOrAdmin) {
     // Business / Staff cancelled: notify the customer owner (unless self-action)
@@ -296,8 +302,10 @@ export async function cancelAppointmentInTx(
           notificationId: notif.id,
           recipientUserIds: [current.customerId],
           actorUserId: params.actorUser.id,
-          title: "Tu cita fue cancelada",
-          body: "Ingresa a Mis citas para revisar el cambio y reservar un nuevo horario.",
+          title: `⚠️ Cita cancelada: ${serviceName} (${dateShort} ${timeFormatted})`,
+          body: `${staffName} canceló tu cita de ${serviceName} del ${dateFormatted} a las ${timeFormatted}. Motivo: "${
+            cleanReason || "Imprevisto de agenda"
+          }". Toca para elegir otro horario.`,
           targetPath: `/?tab=my-appointments&appointmentId=${encodeURIComponent(current.id)}`,
           tag: `apt-cancel-${current.id}`,
         });
@@ -324,9 +332,7 @@ export async function cancelAppointmentInTx(
         eventKey: staffNotifKey,
         type: "APPOINTMENT_CANCELLED_BY_CUSTOMER",
         title: `Se liberó el horario de las ${timeFormatted} (${serviceName})`,
-        message: `${
-          current.customer?.name || "Un cliente"
-        } canceló su cita de ${serviceName} del ${dateFormatted} a las ${timeFormatted}.`,
+        message: `${customerName} canceló su cita de ${serviceName} del ${dateFormatted} a las ${timeFormatted}.`,
       });
     }
 
@@ -342,8 +348,8 @@ export async function cancelAppointmentInTx(
         appointmentId: current.id,
         recipientUserIds: staffRecipients,
         actorUserId: params.actorUser.id,
-        title: "Se liberó un horario en tu agenda",
-        body: "Un cliente canceló su reserva. Revisa tu agenda actualizada.",
+        title: `🔓 Cita cancelada: ${serviceName} (${timeFormatted})`,
+        body: `${customerName} canceló su cita de ${serviceName} con ${staffName} del ${dateFormatted} a las ${timeFormatted}. El horario quedó libre.`,
         targetPath: `/admin?tab=agenda&date=${encodeURIComponent(dateYmd)}&appointmentId=${encodeURIComponent(current.id)}`,
         tag: `apt-cust-cancel-${current.id}`,
       });
@@ -356,8 +362,10 @@ export async function cancelAppointmentInTx(
     staffId: updated.staffId,
     customerId: updated.customerId,
     actorUserId: params.actorUser.id,
-    customerName: current.customer?.name || "Cliente",
+    customerName,
     serviceName,
+    staffName,
+    reason: effectiveStaffReason || cleanReason,
     startAt: current.startAt.toISOString(),
     status: "CANCELLED",
     cancelledBy: cancelledByTag,
