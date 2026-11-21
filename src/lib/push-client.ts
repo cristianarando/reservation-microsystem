@@ -20,14 +20,6 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
-function uint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-
 async function getSwRegistration(): Promise<ServiceWorkerRegistration | undefined> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
     return undefined;
@@ -197,24 +189,17 @@ export async function subscribeDeviceToWebPush(): Promise<{
     const appServerKey = urlBase64ToUint8Array(keyData.publicKey);
     let sub = await readyReg.pushManager.getSubscription();
 
-    // If an older cached subscription belongs to a different VAPID applicationServerKey, replace it cleanly
+    // Always mint a fresh FCM/push token when the user explicitly clicks "Activar avisos"
+    // so stale Android Chrome subscriptions never linger after re-enabling notifications.
     if (sub) {
-      const existingKeyBuf = sub.options?.applicationServerKey;
-      const matchesServerKey =
-        Boolean(existingKeyBuf) &&
-        uint8ArraysEqual(new Uint8Array(existingKeyBuf as ArrayBuffer), appServerKey);
-      if (!matchesServerKey) {
-        await sub.unsubscribe().catch(() => false);
-        sub = null;
-      }
+      await sub.unsubscribe().catch(() => false);
+      sub = null;
     }
 
-    if (!sub) {
-      sub = await readyReg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: appServerKey.buffer as ArrayBuffer,
-      });
-    }
+    sub = await readyReg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: appServerKey.buffer as ArrayBuffer,
+    });
 
     const saveRes = await fetch("/api/push/subscribe", {
       method: "POST",
@@ -263,13 +248,18 @@ export async function unsubscribeDeviceFromWebPush(): Promise<{
   state: DevicePushState;
 }> {
   try {
-    const endpoint = await getActivePushEndpoint();
+    const reg = await getSwRegistration();
+    const sub = await reg?.pushManager.getSubscription();
+    const endpoint = sub?.endpoint || null;
     if (endpoint) {
       await fetch("/api/push/subscribe", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ endpoint }),
       });
+    }
+    if (sub) {
+      await sub.unsubscribe().catch(() => false);
     }
     await closeDisplayedAccountNotifications();
   } catch {
@@ -297,6 +287,14 @@ export async function sendTestWebPush(): Promise<{
           data?.error ||
           "El servidor no pudo completar el envío Web Push de prueba.",
       };
+    }
+    if (data.notification?.title && data.notification?.body) {
+      await showDeduplicatedSystemNotification({
+        title: data.notification.title,
+        body: data.notification.body,
+        tag: data.notification.tag || `reservas-test-push-${Date.now()}`,
+        url: data.notification.targetPath || "/",
+      });
     }
     return { ok: true };
   } catch {
@@ -329,7 +327,7 @@ export async function closeDisplayedAccountNotifications(): Promise<void> {
 
 /**
  * Shows a deduplicated system notification (sharing `tag` with Web Push so the OS never shows two alerts).
- * Only called when the user has granted permission and the tab is in the background.
+ * Displays whenever permission is granted (foreground or background) unless the same `tag` is already shown.
  */
 export async function showDeduplicatedSystemNotification(params: {
   title: string;
@@ -345,15 +343,23 @@ export async function showDeduplicatedSystemNotification(params: {
     return;
   }
 
-  // If the user is actively looking at the tab, the in-app Toast already informs them
-  if (typeof document !== "undefined" && document.visibilityState === "visible") {
-    return;
-  }
-
   try {
     if ("serviceWorker" in navigator) {
-      const reg = await getSwRegistration();
+      const reg =
+        (await getSwRegistration()) ||
+        (await Promise.race([
+          navigator.serviceWorker.ready.catch(() => undefined),
+          new Promise<undefined>((resolve) =>
+            setTimeout(() => resolve(undefined), 1500)
+          ),
+        ]));
       if (reg) {
+        const existing = await reg
+          .getNotifications({ tag: params.tag })
+          .catch(() => []);
+        if (existing && existing.length > 0) {
+          return;
+        }
         await reg.showNotification(params.title, {
           body: params.body,
           icon: "/icon/192",

@@ -102,6 +102,11 @@ export async function POST(req: Request) {
       .slice(2, 7)}`;
     const targetPath =
       user.role === "CUSTOMER" ? "/?tab=my-appointments" : "/admin?tab=agenda";
+    const title = `🔔 Avisos activos • ${settings?.name || "Reservas"}`;
+    const bodyText = `Hola ${
+      user.name || "usuario"
+    }, las notificaciones para tu cuenta de ${roleLabel} funcionan correctamente en este dispositivo.`;
+    const tag = `reservas-test-push-${Date.now()}`;
 
     await prisma.$transaction((tx) =>
       enqueuePushDeliveriesInTx(tx, {
@@ -109,12 +114,10 @@ export async function POST(req: Request) {
         eventType: "TEST_PUSH",
         recipientUserIds: [user.id],
         actorUserId: null,
-        title: `🔔 Avisos activos • ${settings?.name || "Reservas"}`,
-        body: `Hola ${
-          user.name || "usuario"
-        }, las notificaciones para tu cuenta de ${roleLabel} funcionan correctamente en este dispositivo.`,
+        title,
+        body: bodyText,
         targetPath,
-        tag: `reservas-test-push-${Date.now()}`,
+        tag,
         ttlSeconds: 300,
       })
     );
@@ -152,6 +155,12 @@ export async function POST(req: Request) {
       ok: true,
       stats,
       deliveries,
+      notification: {
+        title,
+        body: bodyText,
+        tag,
+        targetPath,
+      },
     });
   } catch (error: unknown) {
     return safeErrorResponse(
