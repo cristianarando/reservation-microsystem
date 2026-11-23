@@ -75,24 +75,6 @@ export async function getBootstrapPayload(
         themeSurfaceHex: "#9FA0A6",
       },
     });
-  } else if (
-    settings.name === "Clínica Dental & Estética Sonrisa" &&
-    settings.currencySymbol === "$"
-  ) {
-    settings = await prisma.businessSettings.update({
-      where: { id: 1 },
-      data: {
-        name: "Mi Negocio",
-        tagline: "Reserva tu cita en segundos",
-        logoUrl: DEFAULT_BUSINESS_LOGO,
-        currencySymbol: "Bs",
-        staffLabel: "Especialista",
-        phoneWhatsapp:
-          settings.phoneWhatsapp === "+52 55 1234 5678"
-            ? "+59170000000"
-            : settings.phoneWhatsapp,
-      },
-    });
   }
 
   const services = await prisma.service.findMany({
