@@ -11,8 +11,8 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:/app/data/prod.db
-      - SESSION_SECRET=${SESSION_SECRET:?Define SESSION_SECRET en .env (mínimo 32 caracteres)}
-      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:?Define NEXT_PUBLIC_APP_URL (ej. https://tudominio.com)}
+      - SESSION_SECRET=${SESSION_SECRET:?Set SESSION_SECRET in .env (minimum 32 characters)}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:?Set NEXT_PUBLIC_APP_URL in .env (e.g. https://yourdomain.com)}
       - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-${NEXT_PUBLIC_APP_URL}}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}

@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 
 const STAFF_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-// Solo el ADMIN (Dueño principal) puede dar de alta o revocar personal/doctores
+// Only ADMIN (primary owner) can create or revoke staff/provider accounts
 export async function POST(req: Request) {
   try {
     const originErr = verifySameOrigin(req);

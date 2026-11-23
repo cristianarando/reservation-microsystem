@@ -76,7 +76,7 @@ export function HomeClient({ initialData }: HomeClientProps) {
 
   return (
     <div className="min-h-dvh flex flex-col bg-[#EBEBEF]">
-      {/* Banner de Modo Vista Previa / Auditoría solo para el Administrador Dueño */}
+      {/* Preview / Audit Mode Banner for Primary Admin Owner only */}
       {isAdminOwner && (
         <div className="bg-[#1F1F23] text-white text-xs px-3 sm:px-4 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 z-50 sticky top-0 shadow-md">
           <div className="flex items-start sm:items-center gap-2 min-w-0">
@@ -97,7 +97,7 @@ export function HomeClient({ initialData }: HomeClientProps) {
         </div>
       )}
 
-      {/* Flujo de Reserva para Clientes */}
+      {/* Customer Booking Flow */}
       <main className="flex-1 w-full py-0 md:py-8 md:px-6 flex flex-col items-center justify-start">
         <ClientApp initialData={data} onRefresh={loadData} />
       </main>

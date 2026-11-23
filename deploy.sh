@@ -1,11 +1,11 @@
 #!/bin/sh
 set -e
-echo "⬇️ Actualizando repositorio..."
+echo "⬇️ Updating repository..."
 git pull origin main
-echo "📦 Descargando imagen precompilada desde GitHub Container Registry..."
+echo "📦 Pulling prebuilt image from GitHub Container Registry..."
 docker compose pull
-echo "🚀 Reiniciando contenedor con la nueva imagen (sin compilar en la VM)..."
+echo "🚀 Restarting container with the new image (no on-VM build)..."
 docker compose up -d --no-build
-echo "🧹 Limpiando imágenes antiguas..."
+echo "🧹 Pruning old images..."
 docker image prune -f
 docker compose ps
