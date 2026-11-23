@@ -1,5 +1,6 @@
 # Reservas App — Multi-Staff Appointment Scheduling & Booking Platform
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-citas.cristianarando.dev-16a34a)](https://citas.cristianarando.dev)
 [![CI](https://github.com/cristianarando/reservation-microsystem/actions/workflows/ci.yml/badge.svg)](https://github.com/cristianarando/reservation-microsystem/actions/workflows/ci.yml)
 [![Docker Publish](https://github.com/cristianarando/reservation-microsystem/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/cristianarando/reservation-microsystem/actions/workflows/docker-publish.yml)
 [![Next.js](https://img.shields.io/badge/Next.js-16.4.5-black?logo=next.js)](https://nextjs.org/)
@@ -10,6 +11,10 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A modular, white-label appointment management and online booking platform built for multi-professional service businesses (clinics, barbershops, salons, studios, and consulting practices).
+
+**Live Deployment:**
+- **Customer Booking Portal:** https://citas.cristianarando.dev
+- **Admin & Staff Portal:** https://citas.cristianarando.dev/admin
 
 > **Localization note:** User-facing UI copy and API validation messages are localized in Spanish for LATAM/Bolivia businesses; source code, tests, and technical documentation are maintained in English.
 
@@ -134,7 +139,7 @@ pnpm dev
 
 ---
 
-## Pre-configured Seed Accounts
+## Pre-configured Seed Accounts (Local Development)
 
 | Role | Name | Email | Password | Scope |
 | :--- | :--- | :--- | :--- | :--- |
