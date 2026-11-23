@@ -11,9 +11,6 @@ importers:
       '@prisma/client':
         specifier: ^6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
-      '@types/leaflet':
-        specifier: ^1.9.22
-        version: 1.9.22
       bcryptjs:
         specifier: ^3.0.3
         version: 3.0.3
@@ -39,6 +36,9 @@ importers:
       '@types/bcryptjs':
         specifier: ^3.0.0
         version: 3.0.0
+      '@types/leaflet':
+        specifier: ^1.9.22
+        version: 1.9.22
       '@types/node':
         specifier: ^20
         version: 20.19.43
