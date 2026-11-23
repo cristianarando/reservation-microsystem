@@ -1,26 +1,35 @@
 import { prisma } from "@/lib/prisma";
+import { sanitizeUserForClient } from "@/lib/api-guard";
 import { getCurrentUser, getImpersonatorId } from "@/lib/session";
 import { getCustomerBootstrapAppointments } from "@/lib/appointment-queries";
 import { DEFAULT_BUSINESS_LOGO } from "@/lib/avatars";
+import type {
+  PortalAppointment,
+  PortalBusinessSettings,
+  PortalNotification,
+  PortalService,
+  PortalStaffMember,
+  PortalUser,
+} from "@/types/portal";
 
 export interface BootstrapHistoryPage {
-  items: any[];
+  items: PortalAppointment[];
   nextCursor: string | null;
   hasMore: boolean;
   totalCount: number;
 }
 
 export interface BootstrapPayload {
-  settings: any;
-  services: any[];
-  staff: any[];
-  currentUser: any;
+  settings: PortalBusinessSettings | null;
+  services: PortalService[];
+  staff: PortalStaffMember[];
+  currentUser: PortalUser | null;
   impersonatorId?: string | null;
-  userAppointments: any[];
+  userAppointments: PortalAppointment[];
   userHistory: BootstrapHistoryPage;
-  allAppointments: any[];
-  notifications: any[];
-  allUsers: any[];
+  allAppointments: PortalAppointment[];
+  notifications: PortalNotification[];
+  allUsers: PortalUser[];
   error?: string;
 }
 
@@ -143,30 +152,34 @@ export async function getBootstrapPayload(
   });
 
   // Public staff payload must not leak the linked account id or internal TimeOff reasons.
-  const safeStaff = isStaffOrAdmin
+  const safeStaff: PortalStaffMember[] = isStaffOrAdmin
     ? staff
-    : staff.map(({ userId: _userId, timeOffs, ...rest }) => ({
-        ...rest,
-        timeOffs: (timeOffs || []).map((t) => ({
-          id: t.id,
-          staffId: t.staffId,
-          startAt: t.startAt,
-          endAt: t.endAt,
-          type: t.type,
-          reason: t.publicNote ?? null,
-          publicNote: t.publicNote ?? null,
-          createdAt: t.createdAt,
-        })),
-      }));
+    : staff.map(({ timeOffs, ...rest }) => {
+        const publicStaff: PortalStaffMember = {
+          ...rest,
+          timeOffs: (timeOffs || []).map((t) => ({
+            id: t.id,
+            staffId: t.staffId,
+            startAt: t.startAt,
+            endAt: t.endAt,
+            type: t.type,
+            reason: t.publicNote ?? null,
+            publicNote: t.publicNote ?? null,
+            createdAt: t.createdAt,
+          })),
+        };
+        delete publicStaff.userId;
+        return publicStaff;
+      });
 
-  let userAppointments: any[] = [];
+  let userAppointments: PortalAppointment[] = [];
   let userHistory: BootstrapHistoryPage = {
     items: [],
     nextCursor: null,
     hasMore: false,
     totalCount: 0,
   };
-  let notifications: any[] = [];
+  let notifications: PortalNotification[] = [];
 
   if (currentUser) {
     // Always fetch ALL unread notifications so no pending alert is ever dropped,
@@ -192,8 +205,8 @@ export async function getBootstrapPayload(
     notifications = [...unreadNotifs, ...readNotifs];
   }
 
-  let allAppointments: any[] = [];
-  let allUsers: any[] = [];
+  let allAppointments: PortalAppointment[] = [];
+  let allUsers: PortalUser[] = [];
 
   const agendaDateFilter =
     options.agendaFrom || options.agendaTo
@@ -271,15 +284,8 @@ export async function getBootstrapPayload(
   }
 
   // Never ship credential material or internal notes/invite hashes to the browser.
-  const safeCurrentUser = currentUser
-    ? (({
-        passwordHash: _ph,
-        googleId: _gid,
-        adminNotes: _notes,
-        staffInviteTokenHash: _ith,
-        staffInviteExpiresAt: _ite,
-        ...rest
-      }) => rest)(currentUser as any)
+  const safeCurrentUser: PortalUser | null = currentUser
+    ? (sanitizeUserForClient(currentUser) as PortalUser)
     : null;
 
   const impersonatorId =

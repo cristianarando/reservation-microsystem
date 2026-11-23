@@ -55,7 +55,7 @@ export async function POST(req: Request) {
       );
     }
 
-    let targetStaffIds: string[] = Array.isArray(staffIds)
+    const targetStaffIds: string[] = Array.isArray(staffIds)
       ? Array.from(new Set(staffIds.map(String)))
       : [];
 

@@ -1,5 +1,5 @@
 export interface PortalBusinessSettings {
-  id?: string;
+  id?: string | number;
   name: string;
   tagline?: string | null;
   staffLabel?: string | null;
@@ -40,11 +40,14 @@ export interface PortalWorkingShift {
 
 export interface PortalTimeOff {
   id: string;
+  staffId?: string;
   type: string;
   startAt: string | Date;
   endAt: string | Date;
   reason?: string | null;
+  publicNote?: string | null;
   staffName?: string | null;
+  createdAt?: string | Date;
 }
 
 export interface PortalStaffMember {
@@ -59,7 +62,7 @@ export interface PortalStaffMember {
   isActive?: boolean;
   customHorizonDays?: number | null;
   customLeadTimeMin?: number | null;
-  user?: PortalUser | null;
+  user?: (Partial<PortalUser> & { id: string; email: string; role: string }) | null;
   workingShifts: PortalWorkingShift[];
   timeOffs?: PortalTimeOff[];
   services?: Array<{ serviceId: string }>;
@@ -88,9 +91,10 @@ export interface PortalAppointment {
   staffMoveReason?: string | null;
   rescheduleVersion?: number | null;
   canCancel?: boolean;
+  cancelReason?: string;
   isFreeCancellationBecauseOfStaff?: boolean;
   service?: PortalService | null;
-  staff?: PortalStaffMember | null;
+  staff?: (Partial<PortalStaffMember> & { id: string; displayName: string }) | null;
   customer?: Partial<PortalUser> | null;
 }
 

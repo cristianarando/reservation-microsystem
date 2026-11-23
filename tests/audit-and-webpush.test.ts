@@ -541,9 +541,6 @@ async function runAuditVerification() {
 
   const { cancelAppointmentInTx } = await import("../src/lib/appointment-lifecycle");
   const { getBootstrapPayload } = await import("../src/lib/bootstrap");
-  const { POST: ackMovePost } = await import("../src/app/api/appointments/[id]/ack-move/route");
-  const { PUT: adminStatusPut } = await import("../src/app/api/admin/appointments/[id]/status/route");
-  const { POST: staffInvitePost } = await import("../src/app/api/auth/staff-invite/route");
   const { GET: availabilityGet } = await import("../src/app/api/availability/route");
 
   const staffSofia = await prisma.staffProfile.findFirst({

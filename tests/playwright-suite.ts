@@ -1,7 +1,6 @@
 // tests/playwright-suite.ts
 import { chromium, Browser, Page } from "playwright";
 import { prisma } from "../src/lib/prisma";
-import { formatLocalDateYYYYMMDD } from "../src/lib/date-utils";
 import fs from "fs";
 import path from "path";
 
@@ -426,13 +425,13 @@ async function runBrowserTests() {
     // Change first time input to 20:00 and end to 19:00
     const timeInputs = await adminPage.$$("input[type='time']");
     if (timeInputs.length >= 2) {
-      await timeInputs[0].evaluate((el: any) => {
+      await timeInputs[0].evaluate((el: Element) => {
         const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
         nativeSetter?.call(el, "20:00");
         el.dispatchEvent(new Event("input", { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
       });
-      await timeInputs[1].evaluate((el: any) => {
+      await timeInputs[1].evaluate((el: Element) => {
         const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
         nativeSetter?.call(el, "19:00");
         el.dispatchEvent(new Event("input", { bubbles: true }));

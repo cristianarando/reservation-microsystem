@@ -121,7 +121,7 @@ async function main() {
     },
   });
 
-  const customerLucia = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: "lucia.valdez@gmail.com" },
     update: {
       passwordHash: defaultCustomerPassword,
@@ -282,7 +282,7 @@ async function main() {
   const tomorrowEnd = new Date(tomorrow);
   tomorrowEnd.setMinutes(tomorrowEnd.getMinutes() + 40); // 30 min + 10 buffer
 
-  const apt = await prisma.appointment.create({
+  await prisma.appointment.create({
     data: {
       customerId: customerCarlos.id,
       staffId: staffAlejandro.id,

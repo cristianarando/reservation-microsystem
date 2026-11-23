@@ -77,12 +77,19 @@ export async function PUT(req: Request) {
     // Strict validation of shifts array against Acceptance Criteria
     let validatedShifts: ShiftItem[] = [];
     if (Array.isArray(shifts)) {
-      const rawShifts: ShiftItem[] = shifts.map((s: any) => ({
-        id: s.id,
-        dayOfWeek: Number(s.dayOfWeek),
-        startTime: String(s.startTime || "").trim(),
-        endTime: String(s.endTime || "").trim(),
-      }));
+      const rawShifts: ShiftItem[] = shifts.map(
+        (s: {
+          id?: string;
+          dayOfWeek?: unknown;
+          startTime?: unknown;
+          endTime?: unknown;
+        }) => ({
+          id: s.id,
+          dayOfWeek: Number(s.dayOfWeek),
+          startTime: String(s.startTime || "").trim(),
+          endTime: String(s.endTime || "").trim(),
+        })
+      );
 
       const validationResult = validateAllShifts(rawShifts, {
         maxShiftsPerDay: 3,
