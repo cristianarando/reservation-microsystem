@@ -183,10 +183,12 @@ export function sanitizeReturnTo(raw: unknown): string {
 }
 
 /**
- * Resolves a safe origin URL from NEXT_PUBLIC_APP_URL or validated Host headers (prevents Host Header Injection).
+ * Resolves a safe origin URL from NEXT_PUBLIC_APP_URL / NEXT_PUBLIC_SITE_URL or validated Host headers (prevents Host Header Injection).
  */
 export function getSafeBaseUrl(req: Request): string {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const configured =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SITE_URL?.trim();
   if (configured && /^https?:\/\/[a-zA-Z0-9.-]+(:\d{1,5})?$/.test(configured)) {
     return configured.replace(/\/$/, "");
   }
