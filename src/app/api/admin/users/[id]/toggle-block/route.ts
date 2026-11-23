@@ -46,7 +46,7 @@ export async function PUT(
       if (shouldArchiveAndResetStrikes) {
         nextNoShowCount = 0;
         newBlockedState = false;
-        // Archivar las inasistencias del ciclo anterior en la misma transacción
+        // Archive no-shows from the previous cycle within the same transaction
         await tx.appointment.updateMany({
           where: {
             customerId: id,

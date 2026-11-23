@@ -176,7 +176,7 @@ export function AdminPortalClient({
             </div>
           )}
 
-          {/* Google Sign-In para Staff */}
+          {/* Google Sign-In for Staff */}
           <a
             href="/api/auth/google?returnTo=/admin"
             className="w-full py-3 px-4 rounded-full bg-white hover:bg-zinc-50 text-zinc-800 text-xs font-bold border border-zinc-300 shadow-sm flex items-center justify-center gap-2.5 transition-all"

@@ -249,13 +249,13 @@ async function main() {
   await prisma.workingShift.createMany({
     data: [
       // Dr. Alejandro
-      { staffId: staffAlejandro.id, dayOfWeek: 1, startTime: "08:30", endTime: "13:00" }, // Lunes mañana
-      { staffId: staffAlejandro.id, dayOfWeek: 2, startTime: "14:00", endTime: "19:30" }, // Martes tarde
-      { staffId: staffAlejandro.id, dayOfWeek: 3, startTime: "09:00", endTime: "13:00" }, // Miércoles turno 1
-      { staffId: staffAlejandro.id, dayOfWeek: 3, startTime: "15:00", endTime: "19:00" }, // Miércoles turno 2
-      { staffId: staffAlejandro.id, dayOfWeek: 4, startTime: "09:00", endTime: "17:00" }, // Jueves
-      { staffId: staffAlejandro.id, dayOfWeek: 5, startTime: "09:00", endTime: "16:00" }, // Viernes
-      { staffId: staffAlejandro.id, dayOfWeek: 6, startTime: "09:00", endTime: "13:00" }, // Sábado mediodía
+      { staffId: staffAlejandro.id, dayOfWeek: 1, startTime: "08:30", endTime: "13:00" }, // Monday morning
+      { staffId: staffAlejandro.id, dayOfWeek: 2, startTime: "14:00", endTime: "19:30" }, // Tuesday afternoon
+      { staffId: staffAlejandro.id, dayOfWeek: 3, startTime: "09:00", endTime: "13:00" }, // Wednesday shift 1
+      { staffId: staffAlejandro.id, dayOfWeek: 3, startTime: "15:00", endTime: "19:00" }, // Wednesday shift 2
+      { staffId: staffAlejandro.id, dayOfWeek: 4, startTime: "09:00", endTime: "17:00" }, // Thursday
+      { staffId: staffAlejandro.id, dayOfWeek: 5, startTime: "09:00", endTime: "16:00" }, // Friday
+      { staffId: staffAlejandro.id, dayOfWeek: 6, startTime: "09:00", endTime: "13:00" }, // Saturday midday
 
       // Dra. Sofía
       { staffId: staffSofia.id, dayOfWeek: 1, startTime: "10:00", endTime: "18:00" },
@@ -265,12 +265,12 @@ async function main() {
       { staffId: staffSofia.id, dayOfWeek: 5, startTime: "10:00", endTime: "18:00" },
       { staffId: staffSofia.id, dayOfWeek: 6, startTime: "10:00", endTime: "14:00" },
 
-      // Dr. Marcos (Urgencias / Madrugadas)
+      // Dr. Marcos (Emergencies / Late night)
       { staffId: staffMarcos.id, dayOfWeek: 1, startTime: "15:00", endTime: "22:00" },
       { staffId: staffMarcos.id, dayOfWeek: 2, startTime: "15:00", endTime: "22:00" },
       { staffId: staffMarcos.id, dayOfWeek: 4, startTime: "15:00", endTime: "22:00" },
       { staffId: staffMarcos.id, dayOfWeek: 5, startTime: "20:00", endTime: "23:59" },
-      { staffId: staffMarcos.id, dayOfWeek: 6, startTime: "00:00", endTime: "04:00" }, // Madrugada
+      { staffId: staffMarcos.id, dayOfWeek: 6, startTime: "00:00", endTime: "04:00" }, // Late night
     ],
   });
 

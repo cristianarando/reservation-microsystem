@@ -254,7 +254,8 @@ export async function resolveSiteUrl(): Promise<string> {
   if (
     envUrl &&
     envUrl.trim() &&
-    !envUrl.trim().includes("tudominio.com")
+    !envUrl.trim().includes("tudominio.com") &&
+    !envUrl.trim().includes("yourdomain.com")
   ) {
     try {
       const parsed = new URL(envUrl.trim());

@@ -68,7 +68,11 @@ function resolveDefaultVapidSubject(): string {
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
     process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
     "";
-  if (appUrl.startsWith("https://") && !appUrl.includes("tudominio.com")) {
+  if (
+    appUrl.startsWith("https://") &&
+    !appUrl.includes("tudominio.com") &&
+    !appUrl.includes("yourdomain.com")
+  ) {
     try {
       return new URL(appUrl).origin;
     } catch {

@@ -1,4 +1,4 @@
-// Service Worker para soporte PWA instalable y notificaciones Web Push (Android / iOS 16.4+ / Chrome Desktop)
+// Service Worker for installable PWA support and Web Push notifications (Android / iOS 16.4+ / Chrome Desktop)
 const CACHE_NAME = "reservas-pwa-v4";
 const STATIC_PUBLIC_ASSETS = [
   "/manifest.webmanifest",

@@ -190,7 +190,7 @@ export async function GET(req: Request) {
       );
     }
 
-    // Determine Day of Week (0 = Domingo, 1 = Lunes ... 6 = Sábado)
+    // Determine Day of Week (0 = Sunday, 1 = Monday ... 6 = Saturday)
     const dayOfWeek = requestedDate.getDay();
 
     // Query candidates
