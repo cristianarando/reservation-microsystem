@@ -1,156 +1,146 @@
-# 🔄 System Sequence Diagrams & Operational Flows
+# System Sequence Diagrams & Operational Flows
 
-This document details the core operational and transactional workflows of the system modeled using **Mermaid Sequence Diagrams**.
+This document details the core transactional and operational workflows implemented in the application.
 
 ---
 
 ## 1. Availability Calculation Flow (`Slot Engine`)
 
-Describes how the slot engine evaluates weekly working shifts, schedule overrides, and existing appointments to compute purely valid, non-colliding bookable slots.
+Evaluates weekly shifts, active `TimeOff` overrides, existing appointments, and lead time rules to return valid non-colliding slots.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Customer as 👤 Customer (Web/PWA)
-    participant UI as 🖥️ ClientApp (React)
-    participant API as 🚀 /api/availability
-    participant Engine as ⚙️ Slot Engine
-    participant DB as 💾 Database (Prisma)
+    actor Customer as Customer (Web/PWA)
+    participant UI as ClientApp (React)
+    participant API as GET /api/availability
+    participant Engine as slot-engine.ts
+    participant DB as Database (Prisma)
 
     Customer->>UI: Selects Service and Date
     UI->>API: GET /api/availability?serviceId=X&date=YYYY-MM-DD
-    API->>DB: Fetch WorkingShifts for day of week
-    API->>DB: Fetch active TimeOffs for date
-    API->>DB: Fetch confirmed Appointments for date
-    DB-->>API: Consolidated operational data
-    
-    API->>Engine: computeAvailableSlots(date, shifts, timeOffs, appointments)
-    loop For each candidate slot (30-min intervals)
-        Engine->>Engine: Is slot within working shift hours?
-        Engine->>Engine: Is slot in the future (> now + leadTime)?
-        Engine->>Engine: Does slot collide with an active TimeOff override?
-        Engine->>Engine: Does slot collide with an existing appointment?
+    API->>DB: Fetch WorkingShifts for dayOfWeek
+    API->>DB: Fetch overlapping TimeOffs (expose only publicNote)
+    API->>DB: Fetch CONFIRMED / RESCHEDULED_BY_STAFF Appointments
+    DB-->>API: Consolidated schedule data
+
+    API->>Engine: computeAvailableSlotsForStaff(...)
+    loop Each candidate step (slotStepMin)
+        Engine->>Engine: Inside WorkingShift bounds?
+        Engine->>Engine: >= now + effectiveLeadTimeMin?
+        Engine->>Engine: Free of TimeOff & Appointment overlap?
     end
-    Engine-->>API: Array of available slots (e.g. ["09:00", "09:30", "11:00"])
-    API-->>UI: HTTP 200 { date, slots: [...] }
-    UI-->>Customer: Renders interactive slot buttons
+    Engine-->>API: Sorted available "HH:mm" slots
+    API-->>UI: HTTP 200 { date, slots, notices }
+    UI-->>Customer: Renders available slot buttons
 ```
 
 ---
 
-## 2. Atomic Booking Flow with Balanced Assignment (`staffId="ANY"`)
-
-Shows how the system resolves specialist assignment when the customer selects "Any Available Staff".
+## 2. Atomic Booking Flow with Auto-Assignment (`staffId="ANY"`)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Customer as 👤 Customer
-    participant UI as 🖥️ ClientApp
-    participant API as 🚀 /api/appointments
-    participant DB as 💾 Database
+    actor Customer as Customer
+    participant UI as BookingStepConfirm
+    participant API as POST /api/appointments
+    participant DB as Prisma Transaction
+    participant RT as SSE + Web Push
 
-    Customer->>UI: Chooses time slot and fills form (Name, Phone, Password)
+    Customer->>UI: Selects slot & submits booking form
     UI->>API: POST /api/appointments { staffId: "ANY", serviceId, date, time, ... }
-    
-    API->>DB: Check customer's active appointment count
-    alt Active appointments >= 2
-        API-->>UI: HTTP 429 "Maximum 2 active appointments allowed"
-        UI-->>Customer: Displays inline alert preventing submission
-    else Active appointments < 2
-        API->>DB: Find active staff members qualified for this service
-        API->>DB: Find first staff member with an open slot at this exact time
-        alt No specialist available (race condition collision)
-            API-->>UI: HTTP 409 Conflict "Slot no longer available"
-            UI-->>Customer: Prompts to select another time slot
-        else Staff member identified (e.g. Dra. Sofía Ríos)
-            API->>DB: Atomically insert Appointment record (status: "CONFIRMED")
-            API->>DB: Set secure session cookie
-            DB-->>API: Created appointment record
-            API-->>UI: HTTP 200 { appointment: { id, startAt, staff, ... } }
-            UI-->>Customer: Displays Step 5 confirmation screen (Concentric Circles)
-        end
+    API->>API: Verify same-origin, rate limit & role (block PROVIDER)
+    API->>DB: Begin atomic transaction
+    DB->>DB: Check customer blocked state & active booking quota (< maxActiveBookings)
+    DB->>DB: Filter active staff qualified for serviceId & inspect slots
+    alt No specialist open at requested slot
+        DB-->>API: Throw BookingConflictError (409)
+        API-->>UI: HTTP 409 Conflict
+    else Qualified specialist resolved
+        DB->>DB: Create Appointment (status: "CONFIRMED")
+        DB->>DB: Create idempotent Notification & enqueue PushDelivery rows
+        DB-->>API: Commit transaction
+        API->>RT: emitRealtimeEvent(...) + async dispatchPendingPushDeliveries()
+        API-->>UI: HTTP 200 { appointment }
+        UI-->>Customer: Renders confirmation screen
     end
 ```
 
 ---
 
-## 3. 1-Touch Unplanned Schedule Override Flow (`Close Day`)
-
-Illustrates the full day closure procedure, collision detection, and instant unblocking/reopening.
+## 3. Schedule Override & Conflict Resolution Flow (`/api/admin/day-override`)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Doctor as 🩺 Doctor / Admin
-    participant UI as 🖥️ AdminApp
-    participant API as 🚀 /api/admin/day-override
-    participant DB as 💾 Database
+    actor Staff as Doctor / Admin
+    participant UI as AdminOperationModals
+    participant API as POST /api/admin/day-override
+    participant DB as Prisma Transaction
+    participant RT as SSE + Web Push
 
-    Doctor->>UI: Clicks "Cerrar día" on today's calendar
-    UI->>Doctor: Opens modal to enter contextual reason
-    Doctor->>UI: Types reason ("Medical Emergency") and confirms
-    UI->>API: POST /api/admin/day-override { staffId, date, reason }
-    
-    API->>DB: Query appointments affected by this closure
-    alt Conflicting appointments exist
-        API-->>UI: Prompts resolution (Cancel affected appointments & notify)
-        Doctor->>UI: Clicks "Cancelar citas afectadas"
-        UI->>API: POST /api/admin/day-override { resolution: "CANCEL_ALL" }
-        API->>DB: Set appointment statuses to "CANCELLED_BY_PROVIDER"
-        API->>DB: Insert Notification records for affected customers
+    Staff->>UI: Requests LATE_START / EARLY_LEAVE / FULL_DAY_OFF / VACATION
+    UI->>API: POST /api/admin/day-override { staffId, type, startAt, endAt, reason, publicNote }
+    API->>API: Validate temporal bounds & staff ownership
+    API->>DB: Query overlapping active Appointments
+    alt Conflicts exist & no resolution supplied
+        API-->>UI: HTTP 200 { needsResolution: true, conflicting }
+        Staff->>UI: Chooses "CANCEL_ALL" (or "MOVE_TO_END" for late start)
+        UI->>API: POST /api/admin/day-override { ..., resolution }
     end
-    API->>DB: Insert TimeOff record (type: "FULL_DAY_OFF")
-    DB-->>API: Override saved
-    API-->>UI: HTTP 200 { success: true }
-    UI-->>Doctor: Renders "Día cerrado" banner with "🔓 Reabrir horario" button
+    API->>DB: Atomic transaction: resolve conflicts (cancelAppointmentInTx / shift move) + create TimeOff
+    DB-->>API: Commit + return realtime events
+    API->>RT: Emit filtered SSE updates + dispatch Web Push
+    API-->>UI: HTTP 200 { ok: true }
 
-    opt Schedule Reopening / Unblocking
-        Doctor->>UI: Clicks "Reabrir horario / Quitar bloqueo"
-        UI->>API: DELETE /api/admin/day-override?staffId=X&date=YYYY-MM-DD
+    opt Schedule Reopening
+        Staff->>UI: Clicks reopen / remove block
+        UI->>API: DELETE /api/admin/day-override?id=...
         API->>DB: Delete TimeOff record
-        API-->>UI: HTTP 200 { success: true }
-        UI-->>Doctor: Restores calendar and frees slots immediately
+        API->>RT: Emit SCHEDULE_UPDATED
+        API-->>UI: HTTP 200 { ok: true }
     end
 ```
 
 ---
 
-## 4. Anti-Troll Control & Account Re-activation Flow (2-Strike System)
+## 4. Appointment Cancellation & 2-Strike No-Show Flow
 
-Details how unexcused absences trigger automated account locks and the subsequent administrator reset flow.
+### Unified Cancellation (`cancelAppointmentInTx`)
+Shared across `POST /api/appointments/[id]/cancel`, `PUT /api/admin/appointments/[id]/status`, and `POST /api/admin/day-override`:
+- Sets `status = "CANCELLED"`, `cancelledBy = "STAFF" | "CUSTOMER"`, and `cancelledByUserId`.
+- Idempotent if already `CANCELLED` (prevents duplicate `Notification` or `PushDelivery` records).
+- Staff cancellations notify the customer; customer cancellations mark customer unread notices read and notify the assigned staff member (plus `notifyAllStaff` admins).
 
+### 2-Strike No-Show Protection
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Doctor as 🩺 Doctor
-    participant UI as 🖥️ AdminApp
-    participant API as 🚀 /api/admin/appointments/[id]/status
-    participant DB as 💾 Database
-    actor Customer as 👤 Customer
+    actor Staff as Doctor / Admin
+    participant UI as AdminAgendaTab
+    participant API as PUT /api/admin/appointments/[id]/status
+    participant DB as Database (Prisma)
+    actor Customer as Customer
 
-    Doctor->>UI: Patient failed to show up -> Clicks "⚠️ No se presentó"
+    Staff->>UI: Marks elapsed appointment as NO_SHOW
     UI->>API: PUT /api/admin/appointments/[id]/status { status: "NO_SHOW" }
-    API->>DB: Update appointment status to "NO_SHOW"
-    API->>DB: Increment customer's noShowCount by 1
-    
+    API->>API: validateAppointmentStatusTransition(prev, "NO_SHOW")
+    API->>DB: Set status="NO_SHOW" and increment User.noShowCount
     alt noShowCount >= 2
-        API->>DB: Set customer isBlocked = true
-        DB-->>API: Account locked
+        API->>DB: Set User.isBlocked = true
     end
-    API-->>UI: Status updated
+    API-->>UI: HTTP 200 { appointment, customer }
 
-    opt Blocked Customer attempts to book
+    opt Blocked Customer Attempts Booking
         Customer->>API: POST /api/appointments
-        API-->>Customer: HTTP 403 Forbidden ("Account locked due to absences")
+        API-->>Customer: HTTP 403 Forbidden
     end
 
-    opt Administrator manually unlocks customer
-        Doctor->>UI: Navigates to "Clientes" tab -> Clicks "Desbloquear"
+    opt Admin Unlocks Customer
+        Staff->>UI: CustomerControlTab -> Unlock user
         UI->>API: PUT /api/admin/users/[id]/toggle-block
-        API->>DB: Reset noShowCount = 0 and isBlocked = false
-        API->>DB: Archive previous no-shows (status = "NO_SHOW_ARCHIVED")
-        API-->>UI: HTTP 200 { customer: { isBlocked: false } }
-        UI-->>Doctor: Customer badge updated to "Activo (0 faltas)"
+        API->>DB: Reset noShowCount=0, isBlocked=false & archive strikes to "NO_SHOW_ARCHIVED"
+        API-->>UI: HTTP 200 { ok: true, user }
     end
 ```
