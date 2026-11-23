@@ -5,6 +5,29 @@ import { getDayScheduleStatus } from "../src/lib/validation/acceptance-criteria"
 
 const BASE_URL = "http://localhost:3000";
 
+interface E2EStaff {
+  id: string;
+  displayName: string;
+  user?: unknown;
+  userId?: string;
+}
+
+interface E2EAppointment {
+  id: string;
+  staff?: { user?: unknown; userId?: string };
+}
+
+interface E2ENotification {
+  id: string;
+  isRead: boolean;
+  type: string;
+}
+
+interface ManifestIcon {
+  src: string;
+  type?: string;
+}
+
 let passed = 0;
 let failed = 0;
 
@@ -58,12 +81,13 @@ class BrowserSession {
     }
 
     const text = await res.text();
-    let json: any = null;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      json = null;
-    }
+    const json = (() => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return null;
+      }
+    })();
 
     return { status: res.status, ok: res.ok, json, text, headers: res.headers, url: res.url };
   }
@@ -101,11 +125,13 @@ async function runE2E() {
     const services = bootRes.json.services;
     const staffList = bootRes.json.staff;
     const firstService = services[0];
-    const drAlejandro = staffList.find((s: any) => s.displayName.includes("Alejandro")) || staffList[0];
+    const drAlejandro =
+      staffList.find((s: E2EStaff) => s.displayName.includes("Alejandro")) ||
+      staffList[0];
 
     // Find next business weekday within 7-day horizon where all specialists attend
     const now = new Date();
-    let targetDate = new Date(now);
+    const targetDate = new Date(now);
     targetDate.setDate(now.getDate() + 1);
     while (targetDate.getDay() === 0 || targetDate.getDay() === 6) {
       targetDate.setDate(targetDate.getDate() + 1);
@@ -123,7 +149,7 @@ async function runE2E() {
     );
 
     // Verify Saturday availability for Dr. Alejandro (attends 09:00 to 13:00)
-    let nextSaturday = new Date(now);
+    const nextSaturday = new Date(now);
     const daysToSat = (6 - now.getDay() + 7) % 7 || 7;
     if (daysToSat < 7) {
       nextSaturday.setDate(now.getDate() + daysToSat);
@@ -286,7 +312,7 @@ async function runE2E() {
 
       const bootWithPast = await customerSession.request("/api/bootstrap");
       const matchedPast = (bootWithPast.json?.userAppointments || []).find(
-        (a: any) => a.id === pastUnticked.id
+        (a: E2EAppointment) => a.id === pastUnticked.id
       );
       assert(
         Boolean(matchedPast) && matchedPast.canCancel === false,
@@ -427,7 +453,7 @@ async function runE2E() {
     // Verify customer received unread APPOINTMENT_CANCELLED notification
     const custBootAfterCancel = await customerSession.request("/api/bootstrap");
     const unreadNotif = (custBootAfterCancel.json?.notifications || []).find(
-      (n: any) => !n.isRead && n.type === "APPOINTMENT_CANCELLED"
+      (n: E2ENotification) => !n.isRead && n.type === "APPOINTMENT_CANCELLED"
     );
     assert(
       Boolean(unreadNotif),
@@ -443,7 +469,7 @@ async function runE2E() {
 
       const custBootAfterRead = await customerSession.request("/api/bootstrap");
       const stillUnread = (custBootAfterRead.json?.notifications || []).find(
-        (n: any) => n.id === unreadNotif.id && !n.isRead
+        (n: E2ENotification) => n.id === unreadNotif.id && !n.isRead
       );
       assert(
         !stillUnread,
@@ -664,7 +690,8 @@ async function runE2E() {
       const svcId = goodSvc.json.service.id;
       createdServiceIds.push(svcId);
 
-      const secondStaff = staffList.find((s: any) => s.id !== drAlejandro.id) || staffList[1];
+      const secondStaff =
+        staffList.find((s: E2EStaff) => s.id !== drAlejandro.id) || staffList[1];
       const editSvc = await adminSession.request("/api/admin/services", {
         method: "PUT",
         body: JSON.stringify({
@@ -762,11 +789,15 @@ async function runE2E() {
       const page2Res = await customerSession.request(
         `/api/appointments/history?cursor=${encodeURIComponent(firstPageHistory.nextCursor)}&limit=6`
       );
-      const page1Ids = new Set((firstPageHistory.items || []).map((x: any) => x.id));
+      const page1Ids = new Set(
+        (firstPageHistory.items || []).map((x: E2EAppointment) => x.id)
+      );
       const page2Items = page2Res.json?.items || [];
-      const noDuplicates = page2Items.every((x: any) => !page1Ids.has(x.id));
+      const noDuplicates = page2Items.every(
+        (x: E2EAppointment) => !page1Ids.has(x.id)
+      );
       const noStaffLeak = page2Items.every(
-        (x: any) => x.staff?.user === undefined && x.staff?.userId === undefined
+        (x: E2EAppointment) => x.staff?.user === undefined && x.staff?.userId === undefined
       );
       assert(
         page2Res.status === 200 && page2Items.length > 0 && noDuplicates && noStaffLeak,
@@ -800,7 +831,7 @@ async function runE2E() {
 
     // SEC-02: Public bootstrap must not leak staff internal user accounts or PII
     const publicStaffExposed = (bootRes.json?.staff || []).some(
-      (s: any) => s.user !== undefined || s.userId !== undefined
+      (s: E2EStaff) => s.user !== undefined || s.userId !== undefined
     );
     assert(
       !publicStaffExposed,
@@ -997,8 +1028,14 @@ async function runE2E() {
         typeof manifestJson?.name === "string" &&
         manifestJson.name.includes(expectedBizName) &&
         Array.isArray(manifestJson.icons) &&
-        manifestJson.icons.some((ic: any) => String(ic.src).includes("/icon/192") && ic.type === "image/png") &&
-        manifestJson.icons.some((ic: any) => String(ic.src).includes("/icon/512") && ic.type === "image/png"),
+        manifestJson.icons.some(
+          (ic: ManifestIcon) =>
+            String(ic.src).includes("/icon/192") && ic.type === "image/png"
+        ) &&
+        manifestJson.icons.some(
+          (ic: ManifestIcon) =>
+            String(ic.src).includes("/icon/512") && ic.type === "image/png"
+        ),
       "PWA Manifest: /manifest.webmanifest includes personalized business name and 192/512 PNG icons"
     );
 
@@ -1164,7 +1201,9 @@ async function runE2E() {
     }
 
     // 13d. P2: Provider can pause and resume their own agenda via PATCH /api/admin/staff
-    const sofiaProfile = staffList.find((s: any) => s.displayName.includes("Sofía"));
+    const sofiaProfile = staffList.find((s: E2EStaff) =>
+      s.displayName.includes("Sofía")
+    );
     if (sofiaProfile) {
       const pauseRes = await providerSession.request("/api/admin/staff", {
         method: "PATCH",

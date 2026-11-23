@@ -85,7 +85,7 @@ export function computeAvailableSlotsForStaff({
 
   for (const shift of shifts) {
     const shiftStart = parseDateAndTime(dateStr, shift.startTime);
-    let shiftEnd = parseDateAndTime(dateStr, shift.endTime);
+    const shiftEnd = parseDateAndTime(dateStr, shift.endTime);
 
     // Invariant AC-SHIFT-02: Start time must be strictly earlier than end time.
     // Inverted shifts (e.g. 20:00 to 19:00) or zero-duration shifts (14:00 to 14:00) are invalid and produce 0 slots.

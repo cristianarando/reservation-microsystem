@@ -1,5 +1,6 @@
 // src/app/api/appointments/[id]/ack-move/route.ts
 import { NextResponse } from "next/server";
+import type { Appointment } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { safeErrorResponse, verifySameOrigin } from "@/lib/api-guard";
@@ -9,8 +10,13 @@ export const dynamic = "force-dynamic";
 class AckMoveConflictError extends Error {
   status: number;
   currentStatus: string;
-  appointment: any;
-  constructor(message: string, currentStatus: string, appointment: any, status = 409) {
+  appointment: Appointment | null;
+  constructor(
+    message: string,
+    currentStatus: string,
+    appointment: Appointment | null,
+    status = 409
+  ) {
     super(message);
     this.status = status;
     this.currentStatus = currentStatus;
