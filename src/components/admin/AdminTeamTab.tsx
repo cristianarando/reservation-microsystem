@@ -13,11 +13,11 @@ import type {
 } from "@/types/portal";
 
 export interface StaffModalState {
+  id?: string;
   displayName: string;
-  specialty: string;
+  specialtyTitle: string;
   email: string;
   phone: string;
-  bio: string;
   avatarUrl: string;
   serviceIds?: string[];
 }
@@ -83,10 +83,9 @@ export function AdminTeamTab({
           onClick={() =>
             onOpenStaffModal({
               displayName: "",
-              specialty: "",
+              specialtyTitle: "",
               email: "",
               phone: "+591",
-              bio: "",
               avatarUrl: getRandomStaffAvatar(),
               serviceIds: services.map((s) => s.id),
             })
@@ -178,7 +177,7 @@ export function AdminTeamTab({
                       )}
                     </div>
                     <div className="text-xs font-semibold text-zinc-600 mt-0.5">
-                      {st.specialtyTitle || st.specialty || "Especialista"}
+                      {st.specialtyTitle || "Especialista"}
                     </div>
                     <div className="text-[11px] text-zinc-500 mt-0.5">
                       📧 Login Google:{" "}

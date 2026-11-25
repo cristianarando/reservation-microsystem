@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LegalDocumentShell } from "@/components/LegalDocumentShell";
 import { getLegalContext } from "@/lib/legal";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export async function generateMetadata(): Promise<Metadata> {
   const ctx = await getLegalContext();

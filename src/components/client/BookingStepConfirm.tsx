@@ -156,7 +156,7 @@ export function BookingStepConfirm({
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full whitespace-nowrap">
-                  {currentUser?.googleId ? "Google Verificado ✓" : "Verificado"}
+                  Cuenta Verificada ✓
                 </span>
                 <button
                   type="button"

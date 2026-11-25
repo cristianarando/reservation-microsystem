@@ -61,9 +61,7 @@ export function ClientAlertBanners({
       : "";
   const targetServiceName = targetCancelledApt?.service?.name || "";
   const targetStaffName =
-    targetCancelledApt?.staff?.displayName ||
-    targetCancelledApt?.staff?.name ||
-    "el profesional";
+    targetCancelledApt?.staff?.displayName || "el profesional";
   const targetCancelReason = targetCancelledApt?.staffMoveReason || "";
 
   return (

@@ -30,6 +30,7 @@ export interface BootstrapPayload {
   allAppointments: PortalAppointment[];
   notifications: PortalNotification[];
   allUsers: PortalUser[];
+  serverNowIso?: string;
   error?: string;
 }
 
@@ -86,19 +87,19 @@ export async function getBootstrapPayload(
     });
   }
 
-  const services = await prisma.service.findMany({
-    where: { isActive: true },
-    orderBy: { sortOrder: "asc" },
-    include: {
-      staff: true,
-    },
-  });
-
   const currentUser = options.publicOnly ? null : await getCurrentUser();
   const isStaffOrAdmin =
     !options.publicOnly &&
     currentUser &&
     (currentUser.role === "ADMIN" || currentUser.role === "PROVIDER");
+
+  const services = await prisma.service.findMany({
+    where: currentUser?.role === "ADMIN" ? {} : { isActive: true },
+    orderBy: { sortOrder: "asc" },
+    include: {
+      staff: true,
+    },
+  });
 
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
@@ -275,5 +276,6 @@ export async function getBootstrapPayload(
     allAppointments,
     notifications,
     allUsers,
+    serverNowIso: new Date().toISOString(),
   };
 }

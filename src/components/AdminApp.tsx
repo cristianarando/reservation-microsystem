@@ -643,6 +643,7 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
         onScheduleVacation={actions.handleScheduleVacation}
         serviceModal={serviceModal}
         setServiceModal={setServiceModal}
+        onSaveService={actions.handleSaveService}
         staffModal={staffModal}
         setStaffModal={setStaffModal}
         savingStaff={actions.savingStaff}
@@ -651,8 +652,6 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
         setNoShowModalData={setNoShowModalData}
         onStatusChange={actions.handleStatusChange}
         getWhatsAppNoShowUrl={getWhatsAppNoShowUrl}
-        showToast={showToast}
-        onRefresh={onRefresh}
       />
 
       <ToastContainer toasts={toasts} onDismiss={removeToast} />

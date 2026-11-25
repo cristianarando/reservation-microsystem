@@ -1,6 +1,8 @@
 // src/app/api/admin/services/route.ts
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { invalidateSeoCache } from "@/lib/seo";
 import {
   parseJsonObject,
   requireAdmin,
@@ -110,6 +112,9 @@ export async function POST(req: Request) {
 
       return created;
     });
+
+    invalidateSeoCache();
+    revalidatePath("/", "layout");
 
     emitRealtimeEvent({
       type: "SCHEDULE_UPDATED",
@@ -257,6 +262,9 @@ export async function PUT(req: Request) {
 
       return svc;
     });
+
+    invalidateSeoCache();
+    revalidatePath("/", "layout");
 
     emitRealtimeEvent({
       type: "SCHEDULE_UPDATED",

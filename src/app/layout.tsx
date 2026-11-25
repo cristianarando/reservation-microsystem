@@ -1,8 +1,31 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
+import type { CSSProperties } from "react";
 import { buildJsonLd, getSeoProfile, resolveSiteUrl } from "@/lib/seo";
+import { getAccessibleTextColor, normalizeHex } from "@/lib/color-utils";
 import "./globals.css";
 
-export const dynamic = "force-dynamic";
+const plusJakartaSans = localFont({
+  src: [
+    {
+      path: "../assets/fonts/PlusJakartaSans-Regular.woff",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../assets/fonts/PlusJakartaSans-SemiBold.woff",
+      weight: "600",
+      style: "normal",
+    },
+    {
+      path: "../assets/fonts/PlusJakartaSans-Bold.woff",
+      weight: "700",
+      style: "normal",
+    },
+  ],
+  variable: "--font-jakarta",
+  display: "swap",
+});
 
 export async function generateViewport(): Promise<Viewport> {
   const seo = await getSeoProfile();
@@ -88,8 +111,18 @@ export default async function RootLayout({
   const jsonLd = buildJsonLd(seo, siteUrl);
   const safeJsonLdString = JSON.stringify(jsonLd).replace(/</g, "\\u003c");
 
+  const brandPrimary = normalizeHex(seo.themePrimaryHex, "#1F1F23");
+  const brandPrimaryFg = getAccessibleTextColor(brandPrimary);
+  const surfaceAccent = normalizeHex(seo.themeSurfaceHex, "#9FA0A6");
+
+  const themeVars = {
+    "--brand-primary": brandPrimary,
+    "--brand-primary-fg": brandPrimaryFg,
+    "--surface-card": surfaceAccent,
+  } as CSSProperties;
+
   return (
-    <html lang="es" className="h-full">
+    <html lang="es" className={`h-full ${plusJakartaSans.variable}`}>
       <head>
         <script
           type="application/ld+json"
@@ -119,7 +152,10 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-full flex flex-col bg-[#EBEBEF] text-[#1F1F23] antialiased">
+      <body
+        style={themeVars}
+        className="min-h-full flex flex-col bg-[#EBEBEF] text-[#1F1F23] font-sans antialiased"
+      >
         {children}
       </body>
     </html>

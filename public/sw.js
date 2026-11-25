@@ -1,8 +1,7 @@
 // Service Worker for installable PWA support and Web Push notifications (Android / iOS 16.4+ / Chrome Desktop)
-const CACHE_NAME = "reservas-pwa-v4";
+const CACHE_NAME = "reservas-pwa-v5";
 const STATIC_PUBLIC_ASSETS = [
   "/manifest.webmanifest",
-  "/favicon.ico",
   "/icon/192",
   "/icon/512",
 ];

@@ -3,12 +3,12 @@
 export const DEFAULT_BUSINESS_LOGO = "/avatars/default-business.svg";
 
 export const STAFF_AVATAR_PRESETS = [
-  { id: "bot-blurple", label: "Cyber Bot", url: "/avatars/avatar-1.svg" },
-  { id: "kitsune-orange", label: "Kitsune", url: "/avatars/avatar-2.svg" },
-  { id: "astro-emerald", label: "Astro Cat", url: "/avatars/avatar-3.svg" },
-  { id: "gamer-pink", label: "Neo Beat", url: "/avatars/avatar-4.svg" },
-  { id: "mage-violet", label: "Night Owl", url: "/avatars/avatar-5.svg" },
-  { id: "wolf-cyan", label: "Sky Wolf", url: "/avatars/avatar-6.svg" },
+  { id: "specialist-slate", label: "Perfil Azul", url: "/avatars/avatar-1.svg" },
+  { id: "specialist-amber", label: "Perfil Ámbar", url: "/avatars/avatar-2.svg" },
+  { id: "specialist-emerald", label: "Perfil Esmeralda", url: "/avatars/avatar-3.svg" },
+  { id: "specialist-rose", label: "Perfil Coral", url: "/avatars/avatar-4.svg" },
+  { id: "specialist-violet", label: "Perfil Índigo", url: "/avatars/avatar-5.svg" },
+  { id: "specialist-cyan", label: "Perfil Celeste", url: "/avatars/avatar-6.svg" },
 ] as const;
 
 export const DEFAULT_STAFF_AVATAR = STAFF_AVATAR_PRESETS[0].url;

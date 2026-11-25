@@ -558,6 +558,12 @@ export function buildJsonLd(profile: SeoProfile, siteUrl: string) {
   };
 }
 
+let cachedLogoEntry: { url: string; dataUri: string; expiresAt: number } | null = null;
+
+export function invalidateSeoCache(): void {
+  cachedLogoEntry = null;
+}
+
 export async function resolveSatoriImageDataUri(
   rawUrl?: string | null
 ): Promise<string | null> {
@@ -571,6 +577,14 @@ export async function resolveSatoriImageDataUri(
 
   if (!/^https?:\/\//i.test(trimmed)) {
     return null;
+  }
+
+  if (
+    cachedLogoEntry &&
+    cachedLogoEntry.url === trimmed &&
+    cachedLogoEntry.expiresAt > Date.now()
+  ) {
+    return cachedLogoEntry.dataUri;
   }
 
   try {
@@ -598,7 +612,15 @@ export async function resolveSatoriImageDataUri(
     if (buffer.byteLength === 0 || buffer.byteLength > 1_500_000) return null;
 
     const b64 = buffer.toString("base64");
-    return `data:${ct === "image/jpg" ? "image/jpeg" : ct};base64,${b64}`;
+    const dataUri = `data:${ct === "image/jpg" ? "image/jpeg" : ct};base64,${b64}`;
+    if (dataUri.length <= 550_000) {
+      cachedLogoEntry = {
+        url: trimmed,
+        dataUri,
+        expiresAt: Date.now() + 5 * 60_000,
+      };
+    }
+    return dataUri;
   } catch {
     return null;
   }

@@ -1,6 +1,6 @@
 import { buildOpenGraphResponse } from "@/lib/og-render";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export const alt = "Reserva tu cita en línea en tiempo real";
 

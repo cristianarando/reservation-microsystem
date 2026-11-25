@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { getSeoProfile } from "@/lib/seo";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export async function generateMetadata(): Promise<Metadata> {
   const seo = await getSeoProfile();
@@ -9,6 +9,9 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: "Panel de Profesionales y Administración",
     description: `Gestión interna de agenda, horarios y servicios de ${seo.businessName}.`,
+    alternates: {
+      canonical: "/admin",
+    },
     robots: {
       index: false,
       follow: false,

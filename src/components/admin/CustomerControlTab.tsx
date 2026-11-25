@@ -4,19 +4,10 @@ import React from "react";
 import { Phone } from "lucide-react";
 import { WhatsAppIcon } from "../WhatsAppIcon";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
-
-export interface AdminCustomerItem {
-  id: string;
-  name: string;
-  email: string;
-  phone?: string | null;
-  isBlocked: boolean;
-  noShowCount?: number | null;
-  completedCount?: number | null;
-}
+import type { PortalUser } from "@/types/portal";
 
 interface CustomerControlTabProps {
-  allUsers: AdminCustomerItem[];
+  allUsers: PortalUser[];
   custFilter: "all" | "issues";
   onChangeFilter: (filter: "all" | "issues") => void;
   onResetUserStrikes: (userId: string) => void;

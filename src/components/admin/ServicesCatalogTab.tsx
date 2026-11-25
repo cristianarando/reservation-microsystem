@@ -2,31 +2,16 @@
 
 import React from "react";
 import { Plus } from "lucide-react";
-
-export interface CatalogStaffMember {
-  id: string;
-  displayName: string;
-  services?: Array<{ serviceId: string }>;
-}
-
-export interface CatalogServiceItem {
-  id: string;
-  name: string;
-  description?: string | null;
-  durationMin: number;
-  bufferAfterMin?: number | null;
-  price: number;
-  isActive?: boolean;
-  staff?: Array<{ staffId: string }>;
-}
+import { Button } from "@/components/ui/Button";
+import type { PortalService, PortalStaffMember } from "@/types/portal";
 
 interface ServicesCatalogTabProps {
-  services: CatalogServiceItem[];
-  staffList: CatalogStaffMember[];
+  services: PortalService[];
+  staffList: PortalStaffMember[];
   currencySymbol: string;
   onOpenNewService: () => void;
-  onOpenEditService: (svc: CatalogServiceItem, currentStaffIds: string[]) => void;
-  onToggleServiceStaff: (svc: CatalogServiceItem, st: CatalogStaffMember) => void;
+  onOpenEditService: (svc: PortalService, currentStaffIds: string[]) => void;
+  onToggleServiceStaff: (svc: PortalService, st: PortalStaffMember) => void;
 }
 
 export function ServicesCatalogTab({
@@ -43,14 +28,15 @@ export function ServicesCatalogTab({
         <h2 className="text-sm font-bold text-zinc-700 uppercase tracking-wider">
           Catálogo de Servicios ({services.length})
         </h2>
-        <button
+        <Button
           type="button"
+          variant="primary"
+          size="pill"
           onClick={onOpenNewService}
-          className="px-3.5 min-h-[36px] rounded-full bg-[#1F1F23] text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm whitespace-nowrap"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>Nuevo Servicio</span>
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

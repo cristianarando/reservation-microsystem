@@ -21,16 +21,13 @@ import { ClientAuthModal } from "@/components/client/ClientAuthModal";
 import { useToastQueue } from "@/hooks/useToastQueue";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useCustomerHistory } from "@/hooks/useCustomerHistory";
+import { useAvailabilitySlots } from "@/hooks/useAvailabilitySlots";
+import { useClientRealtimeSync } from "@/hooks/useClientRealtimeSync";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
 import { isUpcomingActiveAppointment } from "@/lib/booking-rules";
-import type {
-  AvailabilityUnavailableReason,
-  PublicTimeOffNotice,
-} from "@/lib/timeoff-utils";
 import {
   closeDisplayedAccountNotifications,
   getActivePushEndpoint,
-  showDeduplicatedSystemNotification,
 } from "@/lib/push-client";
 import type {
   BeforeInstallPromptEvent,
@@ -79,8 +76,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     appointmentId?: string | null;
   } | null>(null);
 
-  const { toasts, showToast, removeToast, latestShowToastRef } =
-    useToastQueue(5000);
+  const { toasts, showToast, removeToast } = useToastQueue(5000);
   const {
     pushState,
     setPushState,
@@ -106,8 +102,6 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     initialHistory: initialData?.userHistory,
     enabledForInfiniteScroll: activeTab === "my-appointments",
   });
-
-  const seenSseEventKeysRef = useRef<Set<string>>(new Set());
 
   const [selectedService, setSelectedService] = useState<PortalService | null>(
     services[0] || null
@@ -146,33 +140,20 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const availabilityQueryKey =
-    (step === 3 || step === 4) && selectedService?.id && selectedDateStr
-      ? `${selectedService.id}|${selectedStaffId}|${selectedDateStr}`
-      : null;
-
-  const [availabilityState, setAvailabilityState] = useState<{
-    key: string;
-    slots: string[];
-    timeOffNotices: PublicTimeOffNotice[];
-    unavailableReason: AvailabilityUnavailableReason | null;
-  } | null>(null);
-
-  const availableSlots =
-    availabilityQueryKey && availabilityState?.key === availabilityQueryKey
-      ? availabilityState.slots
-      : [];
-  const timeOffNotices =
-    availabilityQueryKey && availabilityState?.key === availabilityQueryKey
-      ? availabilityState.timeOffNotices
-      : [];
-  const unavailableReason =
-    availabilityQueryKey && availabilityState?.key === availabilityQueryKey
-      ? availabilityState.unavailableReason
-      : null;
-  const slotsLoading = Boolean(
-    availabilityQueryKey && availabilityState?.key !== availabilityQueryKey
-  );
+  const {
+    availableSlots,
+    timeOffNotices,
+    unavailableReason,
+    slotsLoading,
+    refreshSlots,
+    clearAvailabilityState,
+  } = useAvailabilitySlots({
+    step,
+    serviceId: selectedService?.id,
+    staffId: selectedStaffId,
+    dateStr: selectedDateStr,
+    setSelectedTime,
+  });
 
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
@@ -401,240 +382,14 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  const applyAvailabilityPayload = useCallback(
-    (
-      key: string,
-      data: {
-        slots?: string[];
-        timeOffNotices?: PublicTimeOffNotice[];
-        unavailableReason?: AvailabilityUnavailableReason | null;
-      }
-    ) => {
-      const slots: string[] = data.slots || [];
-      setAvailabilityState({
-        key,
-        slots,
-        timeOffNotices: data.timeOffNotices || [],
-        unavailableReason: data.unavailableReason || null,
-      });
-      setSelectedTime((prevTime) => {
-        if (prevTime && slots.includes(prevTime)) return prevTime;
-        return slots.length > 0 ? slots[0] : "";
-      });
-    },
-    [setAvailabilityState, setSelectedTime]
-  );
-
-  useEffect(() => {
-    if (!selectedService?.id || !selectedDateStr || !availabilityQueryKey) {
-      return;
-    }
-    if (step !== 3 && step !== 4) return;
-
-    let isMounted = true;
-    fetch(
-      `/api/availability?serviceId=${selectedService.id}&staffId=${selectedStaffId}&date=${selectedDateStr}&_t=${Date.now()}`,
-      { cache: "no-store" }
-    )
-      .then(async (res) => {
-        if (!res.ok) return { slots: [] };
-        return res.json().catch(() => ({ slots: [] }));
-      })
-      .then((data) => {
-        if (!isMounted || !data) return;
-        applyAvailabilityPayload(availabilityQueryKey, data);
-      })
-      .catch((err) => console.error("Error fetching availability:", err));
-
-    return () => {
-      isMounted = false;
-    };
-  }, [
-    step,
-    selectedService?.id,
-    selectedStaffId,
-    selectedDateStr,
-    availabilityQueryKey,
-    applyAvailabilityPayload,
-  ]);
-
-  useEffect(() => {
-    if (step !== 3 || !selectedService?.id || !selectedDateStr || !availabilityQueryKey) {
-      return;
-    }
-    const keySnapshot = availabilityQueryKey;
-    const refreshSlots = () => {
-      fetch(
-        `/api/availability?serviceId=${selectedService.id}&staffId=${selectedStaffId}&date=${selectedDateStr}&_t=${Date.now()}`,
-        { cache: "no-store" }
-      )
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (data) applyAvailabilityPayload(keySnapshot, data);
-        })
-        .catch(() => {});
-    };
-    window.addEventListener("focus", refreshSlots);
-    const interval = setInterval(refreshSlots, 12000);
-    return () => {
-      window.removeEventListener("focus", refreshSlots);
-      clearInterval(interval);
-    };
-  }, [
-    step,
-    selectedService?.id,
-    selectedStaffId,
-    selectedDateStr,
-    availabilityQueryKey,
-    applyAvailabilityPayload,
-  ]);
-
-  useEffect(() => {
-    const syncBootstrap = () => {
-      if (document.visibilityState === "visible") {
-        onRefresh();
-      }
-    };
-    window.addEventListener("focus", syncBootstrap);
-    document.addEventListener("visibilitychange", syncBootstrap);
-    const poll = setInterval(syncBootstrap, 8000);
-
-    let es: EventSource | null = null;
-    if (typeof EventSource !== "undefined") {
-      es = new EventSource("/api/events");
-      es.onmessage = (msg) => {
-        try {
-          const ev = JSON.parse(msg.data);
-          if (!ev?.type || ev.type === "CONNECTED") return;
-
-          onRefresh();
-          if (
-            step === 3 &&
-            selectedService?.id &&
-            selectedDateStr &&
-            availabilityQueryKey
-          ) {
-            const keySnapshot = availabilityQueryKey;
-            fetch(
-              `/api/availability?serviceId=${selectedService.id}&staffId=${selectedStaffId}&date=${selectedDateStr}&_t=${Date.now()}`,
-              { cache: "no-store" }
-            )
-              .then((res) => (res.ok ? res.json() : null))
-              .then((data) => {
-                if (data) applyAvailabilityPayload(keySnapshot, data);
-              })
-              .catch(() => {});
-          }
-
-          if (ev.suppressAlert) return;
-
-          const dedupKey = ev.eventKey
-            ? String(ev.eventKey)
-            : `${ev.type}:${ev.appointmentId || ""}:${ev.timestamp || ""}`;
-          if (seenSseEventKeysRef.current.has(dedupKey)) return;
-          seenSseEventKeysRef.current.add(dedupKey);
-          if (seenSseEventKeysRef.current.size > 100) {
-            const firstKey = seenSseEventKeysRef.current.values().next().value;
-            if (firstKey) seenSseEventKeysRef.current.delete(firstKey);
-          }
-
-          const timeLabel = ev.startAt
-            ? new Date(ev.startAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "";
-          const dateLabel = ev.startAt
-            ? new Date(ev.startAt).toLocaleDateString("es-ES", {
-                weekday: "short",
-                day: "numeric",
-                month: "short",
-              })
-            : "";
-          const oldTimeLabel = ev.previousStartAt
-            ? new Date(ev.previousStartAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "";
-
-          if (
-            ev.type === "APPOINTMENT_CANCELLED" &&
-            ev.cancelledBy === "STAFF"
-          ) {
-            const title = `⚠️ Cita cancelada: ${
-              ev.serviceName || "Tu reserva"
-            }${timeLabel ? ` (${timeLabel})` : ""}`;
-            const body = `${
-              ev.staffName || "El establecimiento"
-            } canceló tu cita de ${ev.serviceName || "servicio"}${
-              dateLabel ? ` del ${dateLabel}` : ""
-            }${timeLabel ? ` a las ${timeLabel}` : ""}${
-              ev.reason ? `. Motivo: "${ev.reason}"` : ""
-            }. Revisa Mis Citas para elegir otro horario.`;
-            latestShowToastRef.current("warning", title, body);
-            const targetUrl = ev.appointmentId
-              ? `/?tab=my-appointments&appointmentId=${encodeURIComponent(ev.appointmentId)}`
-              : "/?tab=my-appointments";
-            void showDeduplicatedSystemNotification({
-              title,
-              body,
-              tag: ev.appointmentId
-                ? `apt-cancel-${ev.appointmentId}`
-                : dedupKey,
-              url: targetUrl,
-            });
-          } else if (
-            ev.type === "APPOINTMENT_UPDATED" &&
-            ev.status === "RESCHEDULED_BY_STAFF"
-          ) {
-            const title = `🕒 Nuevo horario: ${ev.serviceName || "Tu cita"}${
-              timeLabel ? ` (${timeLabel})` : ""
-            }`;
-            const body = `${
-              ev.staffName || "El profesional"
-            } reprogramó tu cita de ${ev.serviceName || "servicio"}${
-              oldTimeLabel ? ` (antes ${oldTimeLabel})` : ""
-            }${dateLabel ? ` para el ${dateLabel}` : ""}${
-              timeLabel ? ` a las ${timeLabel}` : ""
-            }${
-              ev.reason ? ` por "${ev.reason}"` : ""
-            }. Confirma o reagenda en Mis Citas.`;
-            latestShowToastRef.current("info", title, body);
-            const targetUrl = ev.appointmentId
-              ? `/?tab=my-appointments&appointmentId=${encodeURIComponent(ev.appointmentId)}`
-              : "/?tab=my-appointments";
-            void showDeduplicatedSystemNotification({
-              title,
-              body,
-              tag: ev.appointmentId
-                ? `apt-move-${ev.appointmentId}`
-                : dedupKey,
-              url: targetUrl,
-            });
-          }
-        } catch {
-          // Ignore keepalive or malformed frames
-        }
-      };
-    }
-
-    return () => {
-      window.removeEventListener("focus", syncBootstrap);
-      document.removeEventListener("visibilitychange", syncBootstrap);
-      clearInterval(poll);
-      if (es) es.close();
-    };
-  }, [
+  useClientRealtimeSync({
+    timezone: settings?.timezone,
     onRefresh,
-    step,
-    selectedService?.id,
-    selectedStaffId,
-    selectedDateStr,
-    availabilityQueryKey,
-    applyAvailabilityPayload,
-    latestShowToastRef,
-  ]);
+    onRefreshSlots: () => {
+      if (step === 3) refreshSlots();
+    },
+    showToast,
+  });
 
   const selectedStaffObj = staffList.find((s) => s.id === selectedStaffId);
   const horizonDays =
@@ -695,7 +450,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     if (!options.keepStaff) setSelectedStaffId("ANY");
     setSelectedDateStr(formatLocalDateYYYYMMDD(new Date()));
     setSelectedTime("");
-    setAvailabilityState(null);
+    clearAvailabilityState();
     setCustomerNotes("");
     setBookingError(null);
     if (!options.keepConfirmed) setConfirmedAppointment(null);

@@ -1,5 +1,6 @@
 // src/app/api/admin/shifts/route.ts
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
   validateAllShifts,
@@ -14,6 +15,7 @@ import {
   verifySameOrigin,
 } from "@/lib/api-guard";
 import { emitRealtimeEvent } from "@/lib/realtime-events";
+import { invalidateSeoCache } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
@@ -148,6 +150,9 @@ export async function PUT(req: Request) {
         include: { workingShifts: true },
       });
     });
+
+    invalidateSeoCache();
+    revalidatePath("/", "layout");
 
     emitRealtimeEvent({
       type: "SCHEDULE_UPDATED",

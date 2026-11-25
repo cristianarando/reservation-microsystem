@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- Satori ImageResponse requires standard <img> tags */
 import { ImageResponse } from "next/og";
+import { getAccessibleTextColor } from "@/lib/color-utils";
 import {
   getBrandInitials,
   getSeoProfile,
@@ -9,18 +10,21 @@ import {
 
 export async function buildBrandIconResponse(
   size: number,
-  options: { rounded?: boolean } = {}
+  options: { rounded?: boolean; maskable?: boolean } = {}
 ) {
   const profile = await getSeoProfile().catch(() => null);
   const businessName = profile?.businessName || "Mi Negocio";
   const primaryHex = profile?.themePrimaryHex || "#1F1F23";
+  const fgHex = getAccessibleTextColor(primaryHex);
   const initials = getBrandInitials(businessName);
   const logoDataUri = await resolveSatoriImageDataUri(profile?.logoUrl);
   const fonts = await loadSatoriFonts();
   const isSmall = size <= 64;
-  const radius = options.rounded === false ? 0 : Math.round(size * 0.24);
-  const dotSize = Math.max(8, Math.round(size * 0.19));
-  const dotOffset = Math.max(4, Math.round(size * 0.1));
+  const isMaskable = Boolean(options.maskable);
+  const radius = options.rounded === false || isMaskable ? 0 : Math.round(size * 0.24);
+  const innerLogoRatio = isMaskable ? 0.62 : 0.78;
+  const dotSize = Math.max(8, Math.round(size * (isMaskable ? 0.14 : 0.19)));
+  const dotOffset = Math.max(4, Math.round(size * (isMaskable ? 0.18 : 0.1)));
   const dotBorder = Math.max(2, Math.round(size * 0.04));
 
   return new ImageResponse(
@@ -33,7 +37,7 @@ export async function buildBrandIconResponse(
           alignItems: "center",
           justifyContent: "center",
           borderRadius: `${radius}px`,
-          background: `linear-gradient(145deg, #27272A 0%, ${primaryHex} 55%, #111114 100%)`,
+          background: `linear-gradient(145deg, ${primaryHex} 0%, ${primaryHex} 70%, #111114 100%)`,
           position: "relative",
           fontFamily: "Plus Jakarta Sans",
         }}
@@ -41,8 +45,8 @@ export async function buildBrandIconResponse(
         {logoDataUri ? (
           <div
             style={{
-              width: `${Math.round(size * 0.78)}px`,
-              height: `${Math.round(size * 0.78)}px`,
+              width: `${Math.round(size * innerLogoRatio)}px`,
+              height: `${Math.round(size * innerLogoRatio)}px`,
               borderRadius: "9999px",
               display: "flex",
               alignItems: "center",
@@ -55,8 +59,8 @@ export async function buildBrandIconResponse(
             <img
               src={logoDataUri}
               alt={businessName}
-              width={Math.round(size * 0.78)}
-              height={Math.round(size * 0.78)}
+              width={Math.round(size * innerLogoRatio)}
+              height={Math.round(size * innerLogoRatio)}
               style={{
                 width: "100%",
                 height: "100%",
@@ -70,8 +74,10 @@ export async function buildBrandIconResponse(
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#FFFFFF",
-              fontSize: Math.round(size * (initials.length > 2 ? 0.34 : 0.42)),
+              color: fgHex,
+              fontSize: Math.round(
+                size * (isMaskable ? 0.32 : initials.length > 2 ? 0.34 : 0.42)
+              ),
               fontWeight: 700,
               letterSpacing: "-0.03em",
             }}
@@ -114,7 +120,7 @@ export async function buildOpenGraphResponse() {
   const currencySymbol = profile?.currencySymbol || "Bs";
   const primaryHex = profile?.themePrimaryHex || "#1F1F23";
   const services = profile?.services || [];
-  const staffCount = profile?.staff?.length || 3;
+  const staffCount = profile?.staff?.length ?? 0;
   const initials = getBrandInitials(businessName);
   const logoDataUri = await resolveSatoriImageDataUri(profile?.logoUrl);
   const fonts = await loadSatoriFonts();
@@ -152,7 +158,8 @@ export async function buildOpenGraphResponse() {
           flexDirection: "column",
           justifyContent: "space-between",
           padding: "52px 56px",
-          background: `linear-gradient(135deg, #141418 0%, ${primaryHex} 52%, #11181C 100%)`,
+          background: `radial-gradient(circle at 75% 20%, ${primaryHex}33 0%, transparent 55%), linear-gradient(135deg, #141418 0%, #1B1B22 52%, #11181C 100%)`,
+          borderTop: `6px solid ${primaryHex}`,
           color: "#FFFFFF",
           position: "relative",
           fontFamily: "Plus Jakarta Sans",

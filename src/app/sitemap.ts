@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { getSeoProfile, resolveSiteUrl } from "@/lib/seo";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [siteUrl, seo] = await Promise.all([resolveSiteUrl(), getSeoProfile()]);

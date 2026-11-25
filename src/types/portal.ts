@@ -1,3 +1,20 @@
+export type UserRole = "CUSTOMER" | "PROVIDER" | "ADMIN";
+
+export type AppointmentStatus =
+  | "CONFIRMED"
+  | "RESCHEDULED_BY_STAFF"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "NO_SHOW"
+  | "NO_SHOW_ARCHIVED";
+
+export type TimeOffType =
+  | "LATE_START"
+  | "EARLY_LEAVE"
+  | "FULL_DAY_OFF"
+  | "CUSTOM_BLOCK"
+  | "VACATION";
+
 export interface PortalBusinessSettings {
   id?: string | number;
   name: string;
@@ -8,10 +25,15 @@ export interface PortalBusinessSettings {
   addressText?: string | null;
   googleMapsUrl?: string | null;
   phoneWhatsapp?: string | null;
+  slotStepMin?: number | null;
   bookingHorizonDays?: number | null;
   minLeadTimeMinutes?: number | null;
   minCancelNoticeHours?: number | null;
   maxActiveBookings?: number | null;
+  themePrimaryHex?: string | null;
+  themeSurfaceHex?: string | null;
+  timezone?: string | null;
+  pushHideDetails?: boolean | null;
   updatedAt?: string | Date | null;
 }
 
@@ -19,13 +41,13 @@ export interface PortalUser {
   id: string;
   name: string;
   email: string;
-  role: string;
+  role: UserRole | string;
   phone?: string | null;
   avatarUrl?: string | null;
-  googleId?: string | null;
   isBlocked: boolean;
   noShowCount?: number | null;
   completedCount?: number | null;
+  adminNotes?: string | null;
   notifyAllStaff?: boolean;
   pendingStaffUpgrade?: boolean;
   staffProfile?: { id: string } | null;
@@ -41,7 +63,7 @@ export interface PortalWorkingShift {
 export interface PortalTimeOff {
   id: string;
   staffId?: string;
-  type: string;
+  type: TimeOffType | string;
   startAt: string | Date;
   endAt: string | Date;
   reason?: string | null;
@@ -54,10 +76,7 @@ export interface PortalStaffMember {
   id: string;
   userId?: string | null;
   displayName: string;
-  name?: string | null;
-  specialty?: string | null;
   specialtyTitle?: string | null;
-  bio?: string | null;
   avatarUrl?: string | null;
   isActive?: boolean;
   customHorizonDays?: number | null;
@@ -76,6 +95,7 @@ export interface PortalService {
   bufferAfterMin?: number | null;
   price: number;
   isActive?: boolean;
+  sortOrder?: number;
   staff?: Array<{ staffId: string }>;
 }
 
@@ -83,16 +103,24 @@ export interface PortalAppointment {
   id: string;
   startAt: string | Date;
   endAt: string | Date;
-  status: string;
+  status: AppointmentStatus | string;
   staffId?: string;
   serviceId?: string;
   customerId?: string;
+  priceSnapshot?: number;
   customerNotes?: string | null;
   staffMoveReason?: string | null;
+  previousStartAt?: string | Date | null;
+  allowFreeCancel?: boolean;
   rescheduleVersion?: number | null;
+  customerRescheduleCount?: number | null;
+  isOverbooking?: boolean;
   canCancel?: boolean;
   cancelReason?: string;
   isFreeCancellationBecauseOfStaff?: boolean;
+  canReschedule?: boolean;
+  rescheduleReason?: string;
+  remainingReschedules?: number;
   service?: PortalService | null;
   staff?: (Partial<PortalStaffMember> & { id: string; displayName: string }) | null;
   customer?: Partial<PortalUser> | null;
@@ -126,6 +154,7 @@ export interface PortalBootstrapData {
   notifications?: PortalNotification[];
   userHistory?: PortalHistoryPayload | null;
   impersonatorId?: string | null;
+  serverNowIso?: string;
 }
 
 export interface ServiceModalDraft {

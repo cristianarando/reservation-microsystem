@@ -1,6 +1,6 @@
 import { buildBrandIconResponse } from "@/lib/og-render";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export const size = {
   width: 180,
