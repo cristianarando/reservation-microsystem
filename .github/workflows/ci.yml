@@ -18,6 +18,9 @@ concurrency:
 jobs:
   quality-and-tests:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: file:./ci-test.db
+      SESSION_SECRET: ci-test-session-secret-at-least-32-chars
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

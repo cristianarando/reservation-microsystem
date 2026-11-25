@@ -31,7 +31,8 @@ MIGRATE_OUT=""
 if ! MIGRATE_OUT="$("$PRISMA_BIN" migrate deploy 2>&1)"; then
   echo "$MIGRATE_OUT"
   if echo "$MIGRATE_OUT" | grep -q "P3005"; then
-    echo "[entrypoint] Existing unbaselined SQLite schema detected (P3005); baselining 20261125000000_init..."
+    echo "[entrypoint] Existing unbaselined SQLite schema detected (P3005); syncing missing columns and baselining 20261125000000_init..."
+    "$PRISMA_BIN" db push --skip-generate
     "$PRISMA_BIN" migrate resolve --applied "20261125000000_init"
     "$PRISMA_BIN" migrate deploy
   else
