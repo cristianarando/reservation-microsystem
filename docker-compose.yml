@@ -6,14 +6,19 @@ services:
       dockerfile: Dockerfile
     container_name: reservas-app
     restart: unless-stopped
+    mem_limit: 650m
+    memswap_limit: 900m
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=384
       - DATABASE_URL=file:/app/data/prod.db
       - SESSION_SECRET=${SESSION_SECRET:?Set SESSION_SECRET in .env (minimum 32 characters)}
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:?Set NEXT_PUBLIC_APP_URL in .env (e.g. https://yourdomain.com)}
       - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-${NEXT_PUBLIC_APP_URL}}
+      - GOOGLE_SITE_VERIFICATION=${GOOGLE_SITE_VERIFICATION:-}
+      - TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}

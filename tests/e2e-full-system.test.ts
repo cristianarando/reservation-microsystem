@@ -1,6 +1,7 @@
 // tests/e2e-full-system.test.ts
 import { prisma } from "../src/lib/prisma";
 import { formatLocalDateYYYYMMDD } from "../src/lib/date-utils";
+import { createScopedToken } from "../src/lib/session";
 import { getDayScheduleStatus } from "../src/lib/validation/acceptance-criteria";
 
 const BASE_URL = "http://localhost:3000";
@@ -808,24 +809,36 @@ async function runE2E() {
     // 11. OWASP Top 10 & API Security Hardening Verification
     console.log("\n--- 11. OWASP Top 10 & API Security Hardening (SEC-01 to SEC-07) ---");
 
-    // SEC-01: Forged or unsigned session cookie must be rejected
+    // SEC-01: Forged, unsigned, or cross-purpose session cookie must be rejected
     if (adminUser) {
       const forgedSession = new BrowserSession();
-      forgedSession.cookies["reserva_user_id"] = adminUser.id; // Raw unsigned UUID
+      forgedSession.cookies["reserva_session"] = adminUser.id; // Raw unsigned UUID
       const forgedBoot = await forgedSession.request("/api/bootstrap");
       assert(
         forgedBoot.json?.currentUser === null,
-        "SEC-01 (HMAC Cookie): Raw unsigned userId in reserva_user_id cookie is rejected (currentUser === null)"
+        "SEC-01 (HMAC Cookie): Raw unsigned userId in reserva_session cookie is rejected (currentUser === null)"
       );
 
-      forgedSession.cookies["reserva_user_id"] = `${adminUser.id}.9999999999999.forgedsignature123`;
+      forgedSession.cookies["reserva_session"] = `${adminUser.id}.9999999999999.forgedsignature123`;
       const forgedAdminReq = await forgedSession.request("/api/admin/settings", {
         method: "PUT",
         body: JSON.stringify({ name: "Hacked Clinic" }),
       });
       assert(
-        forgedAdminReq.status === 403,
-        "SEC-01 (HMAC Cookie): Tampered signature on reserva_user_id cookie is blocked with HTTP 403"
+        forgedAdminReq.status === 401,
+        "SEC-01 (HMAC Cookie): Tampered signature on reserva_session cookie is blocked with HTTP 401"
+      );
+
+      // Scoped impersonator token presented as main session cookie must also be rejected
+      forgedSession.cookies["reserva_session"] = createScopedToken("impersonator", adminUser.id, 600);
+      const scopedBoot = await forgedSession.request("/api/bootstrap");
+      const scopedAdminReq = await forgedSession.request("/api/admin/settings", {
+        method: "PUT",
+        body: JSON.stringify({ name: "Scoped Replay Clinic" }),
+      });
+      assert(
+        scopedBoot.json?.currentUser === null && scopedAdminReq.status === 401,
+        "SEC-01 (Scoped Token): Impersonator scoped token replayed in reserva_session is rejected (401)"
       );
     }
 

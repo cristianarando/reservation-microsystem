@@ -8,6 +8,13 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality-and-tests:
     runs-on: ubuntu-latest
@@ -29,8 +36,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Prisma Client
-        run: npx prisma generate
+      - name: Validate Prisma schema & generate client
+        run: |
+          npx prisma validate
+          npx prisma generate
 
       - name: TypeScript type check
         run: npx tsc --noEmit
@@ -44,11 +53,18 @@ jobs:
       - name: Run security and utility validator tests
         run: pnpm test:security
 
-      - name: Run audit and Web Push integration tests
+      - name: Apply migrations, seed, and run integration suites
         env:
           DATABASE_URL: file:./ci-test.db
           SESSION_SECRET: ci-test-session-secret-at-least-32-chars
         run: |
-          npx prisma db push --skip-generate
+          npx prisma migrate deploy
           pnpm db:seed
           pnpm test:audit
+          pnpm test:api
+
+      - name: Build production bundle
+        env:
+          DATABASE_URL: file:./ci-test.db
+          SESSION_SECRET: ci-test-session-secret-at-least-32-chars
+        run: pnpm build

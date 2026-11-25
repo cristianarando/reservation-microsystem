@@ -19,18 +19,20 @@ This document defines the **Functional Requirements (FR)**, **Non-Functional Req
 | **FR-09** | Reopen Schedule | Allow administrators to remove a schedule override and restore open slots. | Working slots immediately become bookable again. |
 | **FR-10** | Flexible Cancel | Customers can cancel bookings with at least 6 hours of advance notice. | If staff modified the appointment, cancellation is penalty-free. |
 | **FR-11** | Anti-Troll Control | Record unexcused absences (`NO_SHOW`) and lock the account on the 2nd strike. | Blocked customers cannot book online and must contact clinic. |
-| **FR-12** | White-Label | Allow business owners to customize branding, logo, colors, and staff label. | Dynamically adapts "Doctor(a)", "Barber", "Stylist", etc. |
+| **FR-12** | White-Label & A11y | Allow business owners to customize branding, logo, WCAG-checked colors, IANA timezone, and staff label. | Dynamically adapts CSS variables, timezone engine, and push privacy. |
+| **FR-13** | Self-Reschedule | Customers can reschedule upcoming appointments in 1 click up to 2 times respecting cancel notice. | Enforces `customerRescheduleCount < 2` atomically and refreshes reminders. |
+| **FR-14** | Walk-In & Pass | Support staff walk-in/overbooking registration, QR digital passes, Google/ICS export & CSV/KPI reports. | Eliminates double-booking unless `isOverbooking=true` is explicitly selected. |
 
 ---
 
 ## 2. Non-Functional Requirements (NFR)
 
-1. **NFR-01 Performance:** The `/api/availability` endpoint must resolve bookable slots in under 100ms across 7-day calendar horizons.
-2. **NFR-02 Responsiveness:** Adaptive mobile-first layout built with Tailwind CSS 4, rendering cleanly on mobile screens (375px+) as well as widescreen desktops (1280px+).
-3. **NFR-03 Security:** Password hashing using `bcrypt` (10 salt rounds), secure HttpOnly session cookies, and strict privilege escalation prevention.
-4. **NFR-04 Timezone Independence:** Eliminates UTC midnight drift bugs through pure local date arithmetic (`formatLocalDateYYYYMMDD`).
-5. **NFR-05 Progressive Web App (PWA):** Compliant `manifest.webmanifest` and Service Worker registration enabling native installation on iOS and Android.
-6. **NFR-06 Defensive Validation:** Redundant validation on both client (React forms) and server (Next.js route handlers). Zero reliance on blocking native dialogs (`window.alert` / `window.confirm`).
+1. **NFR-01 Performance & Footprint:** `/api/availability` resolves slots in <100ms, while production Docker targets Oracle Cloud `E2.1.Micro` (1 GB RAM `linux/amd64`) with `NODE_OPTIONS="--max-old-space-size=384"` and `mem_limit: 650m`.
+2. **NFR-02 Responsiveness & WCAG 2.1 AA:** Adaptive mobile-first Tailwind 4 layout with focus-trapped accessible dialogs (`AccessibleModal`), labeled controls, `>= 4.5:1` contrast validation, and `min-h-[44px]` interactive targets.
+3. **NFR-03 Security:** Password hashing with `bcrypt` (10 salt rounds), purpose-scoped HMAC `HttpOnly` session cookies with `sessionVersion`, CSRF/origin checks, `TRUSTED_PROXY_HOPS` rate limiting, and RFC1918/metadata SSRF guards.
+4. **NFR-04 Business Timezone Independence:** All slot generation, shift bounds, and day overrides resolve strictly in the configured IANA `BusinessSettings.timezone` (`src/lib/timezone.ts`).
+5. **NFR-05 Progressive Web App (PWA) & Reminders:** Compliant `manifest.webmanifest`, network-first Service Worker, RFC 8291/8292 Web Push outbox, and idempotent 24h/2h appointment reminders.
+6. **NFR-06 Defensive Validation & Atomic Concurrency:** Client + server validation paired with SQLite `BEGIN IMMEDIATE` write locks (`withImmediateLock`) and zero native `window.alert`/`window.confirm` dialogs.
 
 ---
 

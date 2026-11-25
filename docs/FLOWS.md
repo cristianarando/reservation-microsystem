@@ -144,3 +144,10 @@ sequenceDiagram
         API-->>UI: HTTP 200 { ok: true, user }
     end
 ```
+
+---
+
+## 5. 1-Click Rescheduling, Walk-In/Overbooking & 24h/2h Reminders
+- **1-Click Rescheduling (`POST /api/appointments/[id]/reschedule`)**: Executed inside `withImmediateLock`; customers can self-reschedule up to **2 times** (`customerRescheduleCount < 2`) respecting `minCancelNoticeHours` (or anytime when `allowFreeCancel = true`), whereas `ADMIN`/`PROVIDER` staff can move appointments freely with optional `allowOverbooking`. Rescheduling clears `reminder24hSentAt` and `reminder2hSentAt` so reminders match the updated timestamp.
+- **Walk-In Reception (`POST /api/admin/appointments`)**: Lets `ADMIN` or scoped `PROVIDER` book walk-in customers quickly (creating/reusing a `@local.invalid` customer record when email is omitted) and optionally bypass slot occupancy with `isOverbooking = true`.
+- **Automated Reminder Worker (`src/lib/services/reminder-service.ts`)**: Polls `[23h, 25h]` (`reminder24hSentAt`) and `[90m, 150m]` (`reminder2hSentAt`) windows every 5 minutes inside `startPushDispatcherWorker`, claiming rows atomically to avoid duplicate in-app or Web Push reminders across restarts.

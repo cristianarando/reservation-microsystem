@@ -39,9 +39,9 @@ flowchart LR
 
     subgraph NextServer["Next.js 16 Standalone Server (Node.js)"]
         SSRPages["SSR App Routes\n(/, /admin, /terminos, /privacidad,\nsitemap, manifest, OG images)"]
-        APIRoutes["REST & SSE Route Handlers\n(/api/bootstrap, /api/availability,\n/api/appointments/*, /api/admin/*,\n/api/auth/*, /api/events, /api/push/*)"]
-        DomainLib["Core Domain & Infrastructure\n(slot-engine, booking-rules,\nappointment-lifecycle, realtime-events,\nweb-push, session, api-guard)"]
-        PrismaORM["Prisma ORM Client\n(WAL Pragmas + Transactions)"]
+        APIRoutes["REST & SSE Route Handlers\n(/api/health, /api/bootstrap, /api/availability,\n/api/appointments/*, /api/admin/*,\n/api/auth/*, /api/events, /api/push/*)"]
+        DomainLib["Core Services & Infrastructure\n(booking/schedule/staff/reminder-service,\nslot-engine, ssrf-guard, timezone, session, web-push)"]
+        PrismaORM["Prisma ORM Client\n(WAL Pragmas + withImmediateLock)"]
     end
 
     subgraph DataStore["Persistence Layer"]
@@ -63,29 +63,34 @@ flowchart LR
 ```mermaid
 flowchart TD
     subgraph ClientUI["Frontend Components & Hooks (src/components & src/hooks)"]
-        ClientApp["ClientApp.tsx + components/client/*\n(4-Step Booking Wizard, History, Auth Modal)"]
-        AdminApp["AdminApp.tsx + components/admin/*\n(Agenda, Shifts, Team, Services, Settings)"]
-        MapsUI["BranchMap.tsx (Google Maps Embed)\nInteractiveMapPicker.tsx (Leaflet Admin Picker)"]
-        Hooks["Custom Hooks\n(useAdminActions, useAdminShifts,\nuseCustomerHistory, usePushNotifications)"]
+        ClientApp["ClientApp.tsx + components/client/*\n(4-Step Booking Wizard, QR/Calendar, History)"]
+        AdminApp["AdminApp.tsx + components/admin/*\n(Agenda KPIs, Walk-In, Shifts, Team, Settings)"]
+        SharedModals["shared/RescheduleModal + ui/AccessibleModal"]
+        MapsUI["BranchMap.tsx (Google Maps Embed)\nInteractiveMapPicker.tsx (Lazy Leaflet Picker)"]
+        Hooks["Custom Hooks\n(admin/*, useAdminShifts, useAvailabilitySlots,\nuseClientRealtimeSync, usePushNotifications)"]
     end
 
-    subgraph Controllers["Next.js Route Handlers (src/app/api)"]
+    subgraph Controllers["Next.js 16 Proxy & Route Handlers (src/proxy.ts + src/app/api)"]
+        HealthAPI["/api/health"]
         AvailabilityAPI["/api/availability"]
-        AppointmentsAPI["/api/appointments/*\n(create, cancel, ack-move, history)"]
-        AdminAPI["/api/admin/*\n(day-override, shifts, staff, services,\nsettings, geocode, push/dispatch)"]
+        AppointmentsAPI["/api/appointments/*\n(create, reschedule, cancel, ack-move, history)"]
+        AdminAPI["/api/admin/*\n(appointments, day-override, shifts, staff,\nservices, settings, geocode, push/dispatch)"]
         AuthAPI["/api/auth/*\n(login, register, google, staff-invite, switch)"]
         RealtimeAPI["/api/events (SSE)\n/api/push/* (subscribe, reconcile, test)"]
     end
 
-    subgraph Domain["Domain & Security Modules (src/lib)"]
-        SlotEngine["slot-engine.ts & acceptance-criteria.ts\n(Slots, shifts, override bounds)"]
-        Lifecycle["booking-rules.ts & appointment-lifecycle.ts\n(Status guards, idempotent cancellations)"]
-        Security["session.ts, api-guard.ts, rate-limit.ts\n(HMAC cookies, sessionVersion, CSRF, PII redaction)"]
+    subgraph Domain["Services & Security Modules (src/lib)"]
+        Services["src/lib/services/*\n(booking, schedule, staff, reminder)"]
+        SlotEngine["slot-engine.ts, timezone.ts & acceptance-criteria.ts\n(Slots, shifts, override bounds, IANA time)"]
+        Lifecycle["booking-rules.ts & appointment-lifecycle.ts\n(2-reschedule cap, status guards, idempotency)"]
+        Security["session.ts, api-guard.ts, ssrf-guard.ts, rate-limit.ts\n(Scoped HMAC cookies, CSRF, 1-hop proxy IP, SSRF)"]
         Delivery["realtime-events.ts & web-push.ts\n(Filtered SSE + RFC 8292/8291 Push Outbox)"]
     end
 
     ClientApp --> Hooks
     AdminApp --> Hooks
+    ClientApp --> SharedModals
+    AdminApp --> SharedModals
     ClientApp --> MapsUI
     AdminApp --> MapsUI
 
@@ -95,12 +100,12 @@ flowchart TD
     Hooks --> AuthAPI
     Hooks --> RealtimeAPI
 
-    AvailabilityAPI --> SlotEngine
-    AppointmentsAPI --> Lifecycle
-    AdminAPI --> Lifecycle
-    AdminAPI --> SlotEngine
-    AppointmentsAPI --> Delivery
-    AdminAPI --> Delivery
+    AvailabilityAPI --> Services
+    AppointmentsAPI --> Services
+    AdminAPI --> Services
+    Services --> SlotEngine
+    Services --> Lifecycle
+    Services --> Delivery
     Controllers --> Security
 ```
 
@@ -108,11 +113,11 @@ flowchart TD
 
 ## 4. Level 4: Deployment Profiles
 
-### Profile A: Containerized Single-Node (Docker + GHCR + SQLite WAL)
-- Multi-stage `Dockerfile` (Node 26 Alpine + Next.js `output: "standalone"`).
-- GitHub Actions builds and publishes images to `ghcr.io/cristianarando/reservation-microsystem`.
-- `docker-compose.yml` mounts `./data:/app/data` for persistent SQLite storage running in `WAL` mode (`busy_timeout = 5000`).
-- `src/instrumentation.ts` starts the background Web Push retry/reclaim worker on Node runtime boot.
+### Profile A: Containerized Single-Node (Oracle Cloud E2.1.Micro 1 GB AMD64 + GHCR + SQLite WAL)
+- Multi-stage `Dockerfile` (`node:24-alpine` + `linux/amd64` + Next.js `output: "standalone"` + `NODE_OPTIONS="--max-old-space-size=384"`).
+- GitHub Actions (`docker-publish.yml`) runs strictly after [`ci.yml`](../.github/workflows/ci.yml) passes and pushes to `ghcr.io/cristianarando/reservation-microsystem`.
+- `docker-compose.yml` binds `127.0.0.1:3000:3000` (fronted by direct Nginx/Caddy with `TRUSTED_PROXY_HOPS=1`), limits memory (`mem_limit: 650m`, `memswap_limit: 900m`), probes `GET /api/health`, and mounts `./data:/app/data` for SQLite WAL + rotating backups (`docker-entrypoint.sh` + `prisma migrate deploy`).
+- `src/instrumentation.ts` starts the 5-minute Web Push retry/reclaim and 24h/2h reminder outbox worker on Node runtime boot.
 
 ### Profile B: Serverless / Managed Cloud (Vercel + Managed PostgreSQL)
 - Switch `prisma/schema.prisma` datasource to `"postgresql"` for Neon/Supabase/RDS clusters.

@@ -10,7 +10,9 @@
     "test": "tsx tests/acceptance-criteria.test.ts",
     "test:security": "tsx tests/security-validators.test.ts",
     "test:audit": "tsx tests/audit-and-webpush.test.ts",
+    "test:api": "tsx tests/api-security-and-concurrency.test.ts",
     "test:e2e": "tsx tests/e2e-full-system.test.ts",
+    "test:playwright": "tsx tests/playwright-suite.ts",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:setup": "prisma generate && prisma db push && tsx prisma/seed.ts"

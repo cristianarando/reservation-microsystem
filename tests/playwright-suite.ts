@@ -59,7 +59,8 @@ async function runBrowserTests() {
     // TC-01: Responsive Desktop vs Mobile & Public Catalog Verification
     // ========================================================================
     console.log("--- TC-01: Responsive Layout & Service Catalog Verification ---");
-    await page.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("button:has-text('⏱️')", { timeout: 10000 });
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "tc01-desktop-home.png") });
 
     const cardContainer = await page.$("main > div");
@@ -248,7 +249,7 @@ async function runBrowserTests() {
     await page.fill("input[placeholder='Ej. Juan Pérez']", "Carlos Paciente QA");
     await page.fill("input[placeholder='tucorreo@ejemplo.com']", testCustomerEmail);
     await page.fill("input[placeholder='••••••••']", testCustomerPass);
-    await page.fill("input[placeholder='+52 55 1234 5678']", "70099881");
+    await page.fill("input[type='tel']", "70099881");
     await page.fill("input[placeholder='Ej. Motivo de consulta o detalle especial']", "Prueba Playwright Cita #1");
 
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "tc05-checkout-filled.png") });
@@ -364,7 +365,8 @@ async function runBrowserTests() {
     const doctorContext = await browser.newContext({ viewport: { width: 1280, height: 850 } });
     const doctorPage = await doctorContext.newPage();
 
-    await doctorPage.goto(`${BASE_URL}/admin`, { waitUntil: "networkidle" });
+    await doctorPage.goto(`${BASE_URL}/admin`, { waitUntil: "domcontentloaded" });
+    await doctorPage.waitForSelector("input[type='email'], [data-testid='header-role-badge']", { timeout: 10000 });
     const sofiaEmail = await doctorPage.$("input[type='email']");
     if (sofiaEmail) {
       await doctorPage.fill("input[type='email']", "sofia@sonrisa.com");
@@ -382,8 +384,9 @@ async function runBrowserTests() {
     );
 
     // Attempt to navigate to customer booking portal '/'
-    await doctorPage.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
-    await doctorPage.waitForTimeout(600);
+    await doctorPage.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
+    await doctorPage.waitForURL("**/admin**", { timeout: 8000 }).catch(() => {});
+    await doctorPage.waitForTimeout(400);
 
     const redirectedUrl = doctorPage.url();
     assert(
@@ -400,7 +403,8 @@ async function runBrowserTests() {
     const adminContext = await browser.newContext({ viewport: { width: 1280, height: 850 } });
     const adminPage = await adminContext.newPage();
 
-    await adminPage.goto(`${BASE_URL}/admin`, { waitUntil: "networkidle" });
+    await adminPage.goto(`${BASE_URL}/admin`, { waitUntil: "domcontentloaded" });
+    await adminPage.waitForSelector("input[type='email']", { timeout: 10000 });
     const adminEmail = await adminPage.$("input[type='email']");
     if (adminEmail) {
       await adminPage.fill("input[type='email']", "alejandro@sonrisa.com");
@@ -528,42 +532,46 @@ async function runBrowserTests() {
     await agendaTabBtn.click({ force: true });
     await adminPage.waitForSelector("button:has-text('Cerrar día')", { timeout: 5000 });
 
-    await closeDayBtn.click();
+    try {
+      await closeDayBtn.click();
 
-    // Await modal and enter reason
-    await adminPage.waitForSelector("button:has-text('Aplicar Bloqueo')", { timeout: 8000 });
-    await adminPage.fill("input[placeholder*='Cumpleaños']", "Emergencia médica Playwright");
-    const applyBlockBtn = await adminPage.$("button:has-text('Aplicar Bloqueo')");
-    if (applyBlockBtn) await applyBlockBtn.click();
-    await adminPage.waitForTimeout(800);
+      // Await modal and enter reason
+      await adminPage.waitForSelector("button:has-text('Aplicar Bloqueo')", { timeout: 8000 });
+      await adminPage.fill("input[placeholder*='Cumpleaños']", "Emergencia médica Playwright");
+      const applyBlockBtn = await adminPage.$("button:has-text('Aplicar Bloqueo')");
+      if (applyBlockBtn) await applyBlockBtn.click();
+      await adminPage.waitForTimeout(800);
 
-    // If conflict modal appears, verify that it does NOT offer MOVE_TO_END at 23:59
-    const conflictModal = await adminPage.$("text=¡Conflicto de Citas Detectado!");
-    if (conflictModal) {
-      const moveToEndBtn = await adminPage.$("button:has-text('Mover')");
+      // If conflict modal appears, verify that it does NOT offer MOVE_TO_END at 23:59
+      const conflictModal = await adminPage.$("text=¡Conflicto de Citas Detectado!");
+      if (conflictModal) {
+        const moveToEndBtn = await adminPage.$("button:has-text('Mover')");
+        assert(
+          moveToEndBtn === null,
+          "TC-09: BUG-03 RESOLVED: Full-day closure does NOT offer moving slots to 23:59:59"
+        );
+        const cancelAllBtn = await adminPage.$("button:has-text('Cancelar citas afectadas')");
+        if (cancelAllBtn) await cancelAllBtn.click();
+        await adminPage.waitForTimeout(800);
+      }
+
+      // Verify closed day banner with reopen button
+      const closedDayBanner = await adminPage.$("text=Día cerrado");
+      const reopenBtn = await adminPage.$("button:has-text('Reabrir horario / Quitar bloqueo')");
       assert(
-        moveToEndBtn === null,
-        "TC-09: BUG-03 RESOLVED: Full-day closure does NOT offer moving slots to 23:59:59"
+        closedDayBanner !== null && reopenBtn !== null,
+        "TC-09: BUG-04 RESOLVED: Day closure is visible on calendar with 'Reabrir horario / Quitar bloqueo' button"
       );
-      const cancelAllBtn = await adminPage.$("button:has-text('Cancelar citas afectadas')");
-      if (cancelAllBtn) await cancelAllBtn.click();
-      await adminPage.waitForTimeout(800);
-    }
 
-    // Verify closed day banner with reopen button
-    const closedDayBanner = await adminPage.$("text=Día cerrado");
-    const reopenBtn = await adminPage.$("button:has-text('Reabrir horario / Quitar bloqueo')");
-    assert(
-      closedDayBanner !== null && reopenBtn !== null,
-      "TC-09: BUG-04 RESOLVED: Day closure is visible on calendar with 'Reabrir horario / Quitar bloqueo' button"
-    );
-
-    // Reopen schedule
-    if (reopenBtn) {
-      await reopenBtn.click();
-      await adminPage.waitForTimeout(800);
-      const reopenedCheck = await adminPage.$("text=Día cerrado");
-      assert(reopenedCheck === null, "TC-09: Day successfully reopened after clicking 'Reabrir horario'");
+      // Reopen schedule
+      if (reopenBtn) {
+        await reopenBtn.click();
+        await adminPage.waitForTimeout(800);
+        const reopenedCheck = await adminPage.$("text=Día cerrado");
+        assert(reopenedCheck === null, "TC-09: Day successfully reopened after clicking 'Reabrir horario'");
+      }
+    } finally {
+      await prisma.timeOff.deleteMany({ where: { reason: "Emergencia médica Playwright" } });
     }
 
     // ========================================================================
@@ -609,7 +617,7 @@ async function runBrowserTests() {
       }
     }
 
-    await page.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("button:has-text('Mis Citas')", { timeout: 10000 });
     await page.click("button:has-text('Mis Citas')");
     await page.waitForSelector("text=Tus Reservas Activas (2)", { timeout: 10000 });
@@ -779,7 +787,7 @@ async function runBrowserTests() {
     const mobilePage = await mobileContext.newPage();
     mobilePage.on("pageerror", (err) => consoleErrors.push(err.message));
 
-    await mobilePage.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
+    await mobilePage.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
     await mobilePage.waitForSelector("button:has-text('Ver mapa en la web'):visible", { timeout: 8000 });
     await mobilePage.screenshot({ path: path.join(SCREENSHOT_DIR, "tc14-mobile-home.png") });
 
@@ -852,7 +860,7 @@ async function runBrowserTests() {
     }
 
     // Check /admin login + tabs on 360x800 mobile
-    await mobilePage.goto(`${BASE_URL}/admin`, { waitUntil: "networkidle" });
+    await mobilePage.goto(`${BASE_URL}/admin`, { waitUntil: "domcontentloaded" });
     await mobilePage.waitForSelector("input[type='email']", { timeout: 8000 });
     const adminLoginMobile = await mobilePage.evaluate(() => {
       const inputs = Array.from(document.querySelectorAll("input"));

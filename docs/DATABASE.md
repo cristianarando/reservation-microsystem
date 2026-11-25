@@ -25,6 +25,8 @@ erDiagram
         int minCancelNoticeHours
         string themePrimaryHex
         string themeSurfaceHex
+        string timezone
+        boolean pushHideDetails
         datetime updatedAt
     }
 
@@ -124,6 +126,10 @@ erDiagram
         string staffMoveReason
         boolean allowFreeCancel
         int rescheduleVersion
+        int customerRescheduleCount
+        boolean isOverbooking
+        datetime reminder24hSentAt
+        datetime reminder2hSentAt
         string cancelledBy
         string cancelledByUserId
         float priceSnapshot
@@ -210,6 +216,8 @@ Singleton configuration record (`id = 1`) holding branding, location, and bookin
 | `minCancelNoticeHours` | `Int` | Default: `6` | Minimum advance notice for penalty-free customer cancel |
 | `themePrimaryHex` | `String` | Default: `"#1F1F23"` | Primary brand accent color |
 | `themeSurfaceHex` | `String` | Default: `"#9FA0A6"` | Secondary surface accent color |
+| `timezone` | `String` | Default: `"America/La_Paz"` | Official IANA business timezone for slots, shifts & overrides |
+| `pushHideDetails` | `Boolean` | Default: `false` | Optional lock-screen privacy toggle stripping patient/service details in Web Push |
 | `updatedAt` | `DateTime` | `@updatedAt` | Last configuration update timestamp |
 
 ### `User` (Identity, RBAC, Session Revocation & Invitations)
@@ -253,9 +261,11 @@ Explicit unavailability overrides and vacation ranges: `id`, `staffId` (FK, casc
 Core reservation lifecycle table:
 - Relations: `customerId` (FK `User`), `staffId` (FK `StaffProfile`), `serviceId` (FK `Service`).
 - Timing & Pricing: `startAt`, `endAt`, `priceSnapshot`, `customerNotes`.
-- Lifecycle & Concurrency:
+- Lifecycle, Rescheduling & Concurrency:
   - `status` (default `"CONFIRMED"`): `"CONFIRMED" | "RESCHEDULED_BY_STAFF" | "COMPLETED" | "CANCELLED" | "NO_SHOW" | "NO_SHOW_ARCHIVED"`.
   - `previousStartAt`, `staffMoveReason`, `allowFreeCancel`, `rescheduleVersion` (monotonic counter).
+  - `customerRescheduleCount` (default `0`, capped at `2` customer reschedules), `isOverbooking` (default `false` for walk-in capacity overrides).
+  - `reminder24hSentAt`, `reminder2hSentAt` (atomic idempotency timestamps for automated reminders).
   - `cancelledBy` (`"STAFF" | "CUSTOMER" | "ADMIN"`), `cancelledByUserId`.
 
 ### `Notification`
@@ -281,5 +291,5 @@ Defined directly in `prisma/schema.prisma`:
 
 ## 4. Database Engine Notes (SQLite WAL vs. PostgreSQL)
 
-- **Local & Single-Node Docker (`sqlite`)**: [`src/lib/prisma.ts`](../src/lib/prisma.ts) applies `PRAGMA journal_mode = WAL`, `PRAGMA busy_timeout = 5000`, `PRAGMA synchronous = NORMAL`, and `PRAGMA foreign_keys = ON` once per process for concurrent read/write safety.
+- **Local & Single-Node Docker (`sqlite`)**: [`src/lib/prisma.ts`](../src/lib/prisma.ts) applies `PRAGMA journal_mode = WAL`, `PRAGMA busy_timeout = 5000`, `PRAGMA synchronous = NORMAL`, and `PRAGMA foreign_keys = ON` once per process, while `withImmediateLock` acquires `BEGIN IMMEDIATE` write locks to prevent double-booking races. Schema migrations are tracked in [`prisma/migrations/20261125000000_init`](../prisma/migrations/20261125000000_init/migration.sql) and applied by `prisma migrate deploy` (with rotating preventive backups in `docker-entrypoint.sh`).
 - **Managed PostgreSQL (Neon / Supabase / RDS)**: Change `provider = "sqlite"` to `provider = "postgresql"` in [`prisma/schema.prisma`](../prisma/schema.prisma), set `DATABASE_URL`, and run `pnpm prisma db push`.

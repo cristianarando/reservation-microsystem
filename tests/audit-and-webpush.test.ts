@@ -29,6 +29,17 @@ import {
   validatePushSubscriptionInput,
 } from "../src/lib/web-push";
 import { redactSensitiveLogText } from "../src/lib/api-guard";
+import {
+  applyDayOverride,
+  findNextAvailableSlotInShifts,
+} from "../src/lib/services/schedule-service";
+import {
+  addDaysYYYYMMDD,
+  formatDateYYYYMMDDInTz,
+  getDayOfWeekInTz,
+  parseDateAndTimeInTz,
+  resolveBusinessTimeZone,
+} from "../src/lib/timezone";
 
 let passed = 0;
 let failed = 0;
@@ -715,15 +726,29 @@ async function runAuditVerification() {
       );
 
       // --- P1 #4: Multi-professional independent MOVE_TO_END plan in day-override ---
-      // Find a weekday within 7 days where both Dra. Sofía and Dr. Marcos have afternoon shifts (e.g., Monday/Tuesday/Thursday 15:00-18:00)
-      const moveDay = new Date();
-      moveDay.setDate(moveDay.getDate() + 1);
-      while (![1, 2, 4].includes(moveDay.getDay())) {
-        moveDay.setDate(moveDay.getDate() + 1);
+      // Verify pure shift helper never spills into night hours when shiftWindows is empty
+      const noWindowSlot = findNextAvailableSlotInShifts({
+        initialCursorMs: Date.now(),
+        durationMs: 30 * 60_000,
+        endOfDayMs: Date.now() + 8 * 3600_000,
+        shiftWindows: [],
+        occupiedIntervals: [],
+      });
+      assert(
+        noWindowSlot === null,
+        "P1 #4 (Shift Guard): findNextAvailableSlotInShifts returns null when shiftWindows is empty"
+      );
+
+      // Find a weekday within 7 days where both Dra. Sofía and Dr. Marcos have afternoon shifts (Mon/Tue/Thu 15:00-18:00)
+      const bizSettings = await prisma.businessSettings.findFirst({ where: { id: 1 } });
+      const bizTz = resolveBusinessTimeZone(bizSettings?.timezone);
+      let moveDateStr = addDaysYYYYMMDD(formatDateYYYYMMDDInTz(new Date(), bizTz), 1);
+      while (![1, 2, 4].includes(getDayOfWeekInTz(moveDateStr, bizTz))) {
+        moveDateStr = addDaysYYYYMMDD(moveDateStr, 1);
       }
-      const moveStart = new Date(moveDay);
-      moveStart.setHours(15, 0, 0, 0);
+      const moveStart = parseDateAndTimeInTz(moveDateStr, "15:00", bizTz);
       const moveEnd = new Date(moveStart.getTime() + 30 * 60_000);
+      const blockEnd16 = parseDateAndTimeInTz(moveDateStr, "16:00", bizTz);
 
       const aptSofia15 = await prisma.appointment.create({
         data: {
@@ -750,26 +775,23 @@ async function runAuditVerification() {
       createdAptIds.push(aptSofia15.id, aptMarcos15.id);
 
       // Both doctors have an appointment at 15:00-15:30 and both have shifts open at 16:00.
-      // Applying a block 15:00-16:00 across both doctors must move BOTH appointments to 16:00 independently!
-      const blockEnd16 = new Date(moveStart.getTime() + 60 * 60_000);
-      const { POST: dayOverridePost } = await import("../src/app/api/admin/day-override/route");
-
-      // Note: In direct route invocation without request cookies, getCurrentUser() returns null;
-      // so let's test the per-staff transactional move logic & verify both doctors can occupy 16:00 independently:
-      await prisma.$transaction(async (tx) => {
-        for (const apt of [aptSofia15, aptMarcos15]) {
-          await tx.appointment.update({
-            where: { id: apt.id },
-            data: {
-              previousStartAt: apt.startAt,
-              startAt: blockEnd16,
-              endAt: new Date(blockEnd16.getTime() + 30 * 60_000),
-              status: "RESCHEDULED_BY_STAFF",
-              rescheduleVersion: { increment: 1 },
-            },
-          });
-        }
+      // Applying a block 15:00-16:00 across both doctors via applyDayOverride must move BOTH independently to 16:00!
+      const adminActor = await prisma.user.findFirst({ where: { role: "ADMIN" } });
+      if (!adminActor) {
+        throw new Error("Expected seeded ADMIN user for P1 #4 verification");
+      }
+      const overrideRes = await applyDayOverride({
+        actorUser: { id: adminActor.id, role: "ADMIN", name: adminActor.name },
+        staffId: "ALL",
+        type: "CUSTOM_BLOCK",
+        startDate: moveStart,
+        endDate: blockEnd16,
+        reason: "Bloqueo multi-doctor P1 #4",
+        resolution: "MOVE_TO_END",
       });
+      if (!overrideRes.hasConflicts && overrideRes.timeOffs) {
+        createdTimeOffIds.push(...overrideRes.timeOffs.map((t) => t.id));
+      }
 
       const [reloadedSofia, reloadedMarcos] = await Promise.all([
         prisma.appointment.findUnique({ where: { id: aptSofia15.id } }),
@@ -778,11 +800,12 @@ async function runAuditVerification() {
       assert(
         reloadedSofia?.startAt.getTime() === blockEnd16.getTime() &&
           reloadedMarcos?.startAt.getTime() === blockEnd16.getTime() &&
+          reloadedSofia?.status === "RESCHEDULED_BY_STAFF" &&
+          reloadedMarcos?.status === "RESCHEDULED_BY_STAFF" &&
           reloadedSofia?.rescheduleVersion === 1 &&
           reloadedMarcos?.rescheduleVersion === 1,
-        "P1 #4 (Multi-Staff Move): Two professionals available at the same hour receive independent 16:00 moves with version=1"
+        "P1 #4 (Multi-Staff Move): applyDayOverride moves two professionals' conflicting 15:00 appointments independently to 16:00 with version=1"
       );
-      void dayOverridePost;
     }
   } finally {
     if (createdTimeOffIds.length > 0) {

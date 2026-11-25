@@ -35,30 +35,30 @@ A modular, white-label appointment management and online booking platform built 
 ## Core Capabilities
 
 ### Customer Booking Portal (`/`)
-- **4-Step Booking Wizard:** Service selection → specialist selection → date and slot selection → customer identification and confirmation.
+- **4-Step Booking Wizard (with OAuth Draft Persistence):** Service selection → specialist selection → date and slot selection → authenticated customer confirmation & summary (with automatic `sessionStorage` draft restoration across Google OAuth).
 - **Load-Balanced Auto-Assignment (`ANY`):** Automatically assigns an available qualified professional when the customer selects any available staff member.
-- **Self-Service "My Appointments" Hub:** Displays active, staff-rescheduled, and archived bookings with cursor-paginated infinite scroll (`/api/appointments/history`).
-- **One-Tap WhatsApp Deep-Links:** Generates pre-filled `https://wa.me/` links with appointment date, time, service, and clinic details.
-- **Installable PWA & Opt-In Web Push:** `manifest.webmanifest`, network-first service worker excluding private API/session responses from cache, and per-device push notification subscriptions with lock-screen privacy.
+- **QR Digital Pass & Calendar Export:** Step 5 confirmation and active booking cards generate a zero-dependency ISO/IEC 18004 SVG QR pass (`qr-svg.ts`), Google Calendar deep-link, and `.ics` (`VALARM` `-PT60M`) download (`calendar-export.ts`).
+- **Self-Service "My Appointments" Hub & 1-Click Rescheduling:** Displays active, staff-rescheduled, and archived bookings with cursor-paginated infinite scroll (`/api/appointments/history`), plus 1-click rescheduling (`POST /api/appointments/[id]/reschedule`) capped at 2 changes per appointment (`customerRescheduleCount < 2`) respecting cancellation notice windows.
+- **One-Tap WhatsApp Deep-Links & Reminders:** Pre-filled `https://wa.me/` links, automated 24h & 2h pre-appointment reminder outbox (`reminder-service.ts`), installable PWA `manifest.webmanifest`, network-first service worker excluding private API/session responses, and per-device Web Push with optional lock-screen privacy (`pushHideDetails`).
 
 ### Administrative & Operations Hub (`/admin`)
 - **Role-Based Access Control (RBAC):**
-  - `ADMIN`: Full access to business branding, catalog, branch location picker, weekly shifts, staff invitations, customer controls, and global calendar.
-  - `PROVIDER`: Scoped workspace limited to their own appointments, attendance tracking, and personal schedule overrides (strictly blocked from self-booking as a customer on `/`).
-- **Real-Time Live Sync (SSE):** Server-Sent Events (`/api/events`) with server-side per-role and per-staff payload filtering.
-- **1-Touch Unplanned Schedule Overrides & Vacations:** Late arrival, early departure, full-day closure, vacation ranges, instant schedule reopening, and atomic conflict resolution (`MOVE_TO_END` or `CANCEL_ALL`).
+  - `ADMIN`: Full access to business branding, WCAG contrast-checked dynamic palette (`themePrimaryHex`, `themeSurfaceHex`), catalog (including `bufferAfterMin` & archive/restore), branch location picker, weekly shifts, staff photo uploads & invitations, customer notes/controls, and global calendar.
+  - `PROVIDER`: Scoped workspace limited to their own appointments, walk-in/overbooking registration, rescheduling, attendance tracking, and personal schedule overrides (strictly blocked from self-booking as a customer on `/`).
+- **Walk-In Reception, Overbooking & Agenda Analytics:** Instant walk-in booking (`POST /api/admin/appointments` with optional `allowOverbooking`), staff rescheduling modal, daily 4-card KPI strip, instant search, and UTF-8 BOM CSV export.
+- **Real-Time Live Sync (SSE) & Push Queue Monitor:** Server-Sent Events (`/api/events`) with server-side per-role and per-staff payload filtering plus live Web Push queue metrics and dispatch controls (`/api/admin/push/dispatch`).
+- **1-Touch Unplanned Schedule Overrides & Vacations:** Late arrival, early departure, full-day closure, vacation ranges, public-safe notes (`publicNote` vs internal `reason`), instant schedule reopening, and atomic conflict resolution (`MOVE_TO_END` or `CANCEL_ALL`).
 - **Anti-Hoarding & 2-Strike No-Show Protection:** Configurable cap on active upcoming bookings per customer (`maxActiveBookings`) and automatic web-booking lock after 2 `NO_SHOW` strikes with admin unlock/archive workflow.
-- **Dynamic White-Label & SEO/OG:** Configurable brand name, `staffLabel`, currency symbol, theme colors, dynamic `sitemap.xml`, `robots.txt`, JSON-LD metadata, and generated Open Graph / Twitter cards.
 
 ---
 
 ## Architectural Highlights & Engineering Decisions
 
-1. **Zero-Dependency Native Web Push (`src/lib/web-push.ts`):** Implements RFC 8292 VAPID ES256 JWT signing and RFC 8291 `aes128gcm` payload encryption directly over Node's `node:crypto`, backed by a persistent `PushDelivery` outbox with deduplication (`eventKey`), `Retry-After` backoff, `410 Gone` subscription cleanup, stale-lease crash recovery, and lock-screen safe generic titles.
-2. **Server-Side Filtered SSE (`src/lib/realtime-events.ts`):** Broadcasts live updates without leaking PII across tenants/roles—anonymous visitors only receive generic `SCHEDULE_UPDATED` invalidation signals, customers only receive details for their own appointments, and providers only receive events for their own `staffId`.
-3. **Hardened Sessions & API Guards (`src/lib/session.ts`, `src/lib/api-guard.ts`):** HMAC-SHA256 `HttpOnly` cookies verified with `timingSafeEqual`, database-backed `sessionVersion` revocation on credential/role updates, staff invite token rotation, Google OAuth CSRF state nonces, `Origin` verification, rate limiting, and strict input/URL sanitization.
-4. **Pure Decoupled Domain Engine (`src/lib/slot-engine.ts`, `src/lib/booking-rules.ts`, `src/lib/appointment-lifecycle.ts`):** Pure TypeScript functions handle slot generation, local-date arithmetic (avoiding UTC midnight drift), cancellation notice checks, and formal state transitions (`validateAppointmentStatusTransition`).
-5. **Dual Deployment Profile (SQLite WAL vs. PostgreSQL):** Single-container Docker deployments enable SQLite `WAL` mode + `busy_timeout` (`src/lib/prisma.ts`) for simple single-node hosting with zero external DB ops; the Prisma schema can also switch to PostgreSQL for horizontal/serverless scaling.
+1. **Zero-Dependency Native Web Push & Automated Reminders (`src/lib/web-push.ts`, `src/lib/services/reminder-service.ts`):** Implements RFC 8292 VAPID ES256 JWT signing and RFC 8291 `aes128gcm` payload encryption over Node's `node:crypto`, backed by a persistent `PushDelivery` outbox with deduplication (`eventKey`), `Retry-After` backoff, `410 Gone` subscription cleanup, stale-lease crash recovery, automated 24h/2h appointment reminders, and opt-in lock-screen privacy (`pushHideDetails`).
+2. **Server-Side Filtered SSE & Coalesced Hydration Sync (`src/lib/realtime-events.ts`):** Broadcasts live updates without leaking PII across tenants/roles—anonymous visitors only receive generic `SCHEDULE_UPDATED` invalidation signals, customers only receive details for their own appointments, and providers only receive events for their own `staffId`.
+3. **Hardened Sessions, SSRF & Proxy Rate Limits (`src/lib/session.ts`, `src/lib/api-guard.ts`, `src/lib/ssrf-guard.ts`, `src/lib/rate-limit.ts`):** Purpose-scoped HMAC-SHA256 `HttpOnly` cookies verified with `timingSafeEqual`, `sessionVersion` revocation, Google OAuth CSRF state nonces, same-origin checks, `TRUSTED_PROXY_HOPS` reverse-proxy IP resolution, RFC1918/loopback/metadata SSRF blocking, and strict DTO sanitization.
+4. **Modular Clean Service Layer & Concurrency Locks (`src/lib/services/`, `src/lib/slot-engine.ts`, `src/lib/timezone.ts`):** Domain orchestration in `booking-service.ts`, `schedule-service.ts`, `staff-service.ts`, and `reminder-service.ts` wrapped in SQLite `BEGIN IMMEDIATE` write locks (`withImmediateLock`) and IANA business-timezone arithmetic.
+5. **Low-Memory Single-Node Docker Profile (Oracle Cloud E2.1.Micro AMD64):** Tuned for 1 GB RAM VMs on `node:24-alpine` (`NODE_OPTIONS="--max-old-space-size=384"`, `mem_limit: 650m`), loopback binding `127.0.0.1:3000:3000` behind Nginx/Caddy (`TRUSTED_PROXY_HOPS=1`), `/api/health` readiness probes, preventive rotating SQLite backups + `prisma migrate deploy` (`prisma/migrations/20261125000000_init`), and CI-gated GHCR image publishing.
 
 ---
 
@@ -68,7 +68,7 @@ A modular, white-label appointment management and online booking platform built 
 reservation-microsystem/
 ├── .github/workflows/
 │   ├── ci.yml                     # TypeScript, ESLint, unit, security, and audit/Web Push CI
-│   └── docker-publish.yml         # Multi-stage Docker build & publish to GHCR
+│   └── docker-publish.yml         # CI-gated linux/amd64 Docker build & publish to GHCR
 ├── docs/
 │   ├── ARCHITECTURE.md            # C4 context, container, component & deployment diagrams
 │   ├── DATABASE.md                # Relational schema, ERD, indexes & migration guide
@@ -76,6 +76,7 @@ reservation-microsystem/
 │   ├── REQUIREMENTS.md            # Functional/non-functional specs & bug traceability matrix
 │   └── screenshots/               # Portfolio screenshots
 ├── prisma/
+│   ├── migrations/20261125000000_init/ # Clean Prisma migration history for SQLite deploy
 │   ├── schema.prisma              # 11-model relational schema (SQLite / PostgreSQL)
 │   └── seed.ts                    # Demo clinic, staff, services, shifts & appointments
 ├── public/
@@ -83,29 +84,33 @@ reservation-microsystem/
 │   └── sw.js                      # Service worker (PWA & Web Push click/display handlers)
 ├── src/
 │   ├── app/
-│   │   ├── api/                   # Route handlers (availability, appointments, admin, auth, events, push)
+│   │   ├── api/                   # Route handlers (health, availability, appointments, admin, auth, events, push)
 │   │   ├── admin/                 # Role-protected management portal (SSR preloaded)
 │   │   ├── cookies|privacidad|terminos/ # Dynamic legal pages
 │   │   ├── page.tsx               # Public booking portal (SSR preloaded)
 │   │   └── manifest.ts|robots.ts|sitemap.ts|opengraph-image.tsx
 │   ├── components/
-│   │   ├── admin/                 # Modular admin tabs, header, modals & portal shell
+│   │   ├── admin/                 # Modular admin tabs, header, sub-modals & portal shell
 │   │   ├── client/                # Modular 4-step wizard, history tab, auth modal & banners
-│   │   ├── ui/                    # Reusable Button, Badge, Card, ConfirmModal, ToastContainer
+│   │   ├── shared/                # Shared accessible modals (RescheduleModal, etc.)
+│   │   ├── ui/                    # Reusable AccessibleModal, Button, Badge, Card, ConfirmModal, ToastContainer
 │   │   ├── BranchMap.tsx          # Keyless Google Maps embed modal for customers
-│   │   └── InteractiveMapPicker.tsx # Leaflet/OpenStreetMap location picker for admin
-│   ├── hooks/                     # useAdminActions, useAdminShifts, useCustomerHistory, usePushNotifications, useToastQueue
-│   ├── lib/                       # Domain engines, lifecycle, bootstrap, SSE, Web Push, SEO & security guards
+│   │   └── InteractiveMapPicker.tsx # Lazy-loaded Leaflet/OpenStreetMap location picker for admin
+│   ├── hooks/                     # Domain hooks (admin/*, useAdminShifts, useAvailabilitySlots, useClientRealtimeSync, etc.)
+│   ├── lib/                       # Services (booking/schedule/staff/reminder), engines, QR SVG, ICS, color-utils & guards
+│   ├── proxy.ts                   # Next.js 16 request proxy (security headers / route guards)
 │   └── types/portal.ts            # Shared TypeScript interfaces for client & admin portals
 ├── tests/
-│   ├── acceptance-criteria.test.ts # 30 unit checks (shifts, slot engine, overrides, booking rules)
-│   ├── security-validators.test.ts # 30 checks (XSS URLs, geo parsing, WhatsApp links, time-off dates)
-│   ├── audit-and-webpush.test.ts   # 35 DB/crypto checks (SSE isolation, RFC 8291/8292, outbox retries)
-│   ├── e2e-full-system.test.ts     # HTTP API & database integration suite against running server
-│   └── playwright-suite.ts         # End-to-end Chromium browser verification
-├── Dockerfile                      # Multi-stage Node 26 Alpine standalone image
-├── docker-compose.yml              # Production Compose setup with persistent /app/data volume
-└── deploy.sh                       # Pull-and-restart helper for prebuilt GHCR images
+│   ├── acceptance-criteria.test.ts        # 30 unit checks (shifts, slot engine, overrides, booking rules)
+│   ├── security-validators.test.ts        # 30 checks (XSS URLs, geo parsing, WhatsApp links, time-off dates)
+│   ├── audit-and-webpush.test.ts          # 36 DB/crypto checks (SSE isolation, RFC 8291/8292, outbox retries, overrides)
+│   ├── api-security-and-concurrency.test.ts # Security guards, concurrency races, reschedule/walk-in & reminders
+│   ├── e2e-full-system.test.ts            # HTTP API & database integration suite against running server
+│   └── playwright-suite.ts                # End-to-end Chromium browser verification
+├── Dockerfile                      # Multi-stage Node 24 Alpine standalone image (1 GB RAM tuned)
+├── docker-entrypoint.sh            # Rotating SQLite backup (max 3) + prisma migrate deploy + P3005 fallback
+├── docker-compose.yml              # Loopback 127.0.0.1:3000 setup with mem_limit 650m & /app/data volume
+└── deploy.sh                       # Fast-forward pull, healthcheck wait & safe image prune script
 ```
 
 ---
@@ -164,14 +169,17 @@ pnpm test
 # 2. Security & utility validator tests (30 checks)
 pnpm test:security
 
-# 3. Audit, SSE isolation & native Web Push integration tests (35 checks, uses DB)
+# 3. Audit, SSE isolation & native Web Push integration tests (uses DB)
 pnpm test:audit
 
-# 4. Full-stack HTTP API integration suite (requires running server on :3000)
+# 4. API security, concurrency locks, walk-in, rescheduling & reminder tests (uses DB)
+pnpm test:api
+
+# 5. Full-stack HTTP API integration suite (requires running server on :3000)
 pnpm test:e2e
 
-# 5. End-to-end Chromium suite (requires running server on :3000)
-pnpm tsx tests/playwright-suite.ts
+# 6. End-to-end Chromium suite (requires running server on :3000)
+pnpm test:playwright
 
 # Production build check
 pnpm build
@@ -190,14 +198,14 @@ pnpm build
 
 ## Production Deployment
 
-### Option A: Docker + GitHub Container Registry (SQLite WAL)
-Pushes to `main` build and publish `ghcr.io/cristianarando/reservation-microsystem:latest` via [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml).
-1. Copy `.env.example` to `.env` on your VM and set `SESSION_SECRET` and `NEXT_PUBLIC_APP_URL`.
-2. Start the prebuilt container with persistent volume `./data:/app/data`:
+### Option A: Docker + GitHub Container Registry (Oracle Cloud E2.1.Micro AMD64 / SQLite WAL)
+Pushes to `main` are verified first by [`ci.yml`](.github/workflows/ci.yml); once `CI` succeeds, [`docker-publish.yml`](.github/workflows/docker-publish.yml) builds and publishes `ghcr.io/cristianarando/reservation-microsystem:latest` (`linux/amd64`).
+1. Copy `.env.example` to `.env` on your VM and set `SESSION_SECRET`, `NEXT_PUBLIC_APP_URL`, and `TRUSTED_PROXY_HOPS="1"` (when fronted by Nginx or Caddy on the same VM).
+2. Start the container with persistent volume `./data:/app/data`:
    ```bash
    docker compose up -d
    ```
-   On startup, `docker-entrypoint.sh` syncs the Prisma SQLite schema and launches Next.js standalone on port `3000`.
+   On startup, `docker-entrypoint.sh` creates up to 3 rotating preventive SQLite backups, executes `prisma migrate deploy` (with automatic `P3005` baseline recovery for existing DBs), and starts Next.js standalone on `127.0.0.1:3000` (`mem_limit: 650m`, healthcheck `/api/health`).
 
 ### Option B: Vercel + Serverless PostgreSQL
 1. Provision a PostgreSQL database (e.g., Neon or Supabase) and set `DATABASE_URL`, `SESSION_SECRET`, and `NEXT_PUBLIC_APP_URL`.
