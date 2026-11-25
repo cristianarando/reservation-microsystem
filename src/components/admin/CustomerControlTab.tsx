@@ -1,7 +1,7 @@
 "use client";
 
-import React from "react";
-import { Phone } from "lucide-react";
+import React, { useState } from "react";
+import { FileText, Phone, Search, X } from "lucide-react";
 import { WhatsAppIcon } from "../WhatsAppIcon";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
 import type { PortalUser } from "@/types/portal";
@@ -12,6 +12,11 @@ interface CustomerControlTabProps {
   onChangeFilter: (filter: "all" | "issues") => void;
   onResetUserStrikes: (userId: string) => void;
   onToggleBlockUser: (userId: string, currentlyBlocked: boolean) => void;
+  onUpdateCustomerNotes?: (
+    userId: string,
+    currentlyBlocked: boolean,
+    adminNotes: string
+  ) => Promise<void> | void;
 }
 
 export function CustomerControlTab({
@@ -20,14 +25,31 @@ export function CustomerControlTab({
   onChangeFilter,
   onResetUserStrikes,
   onToggleBlockUser,
+  onUpdateCustomerNotes,
 }: CustomerControlTabProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [editingNoteUserId, setEditingNoteUserId] = useState<string | null>(
+    null
+  );
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
   const issueUsersCount = allUsers.filter(
     (u) => (u.noShowCount || 0) > 0 || u.isBlocked
   ).length;
 
-  const visibleUsers = allUsers.filter((u) =>
-    custFilter === "issues" ? (u.noShowCount || 0) > 0 || u.isBlocked : true
-  );
+  const q = searchQuery.trim().toLowerCase();
+  const visibleUsers = allUsers.filter((u) => {
+    const matchesIssue =
+      custFilter === "issues" ? (u.noShowCount || 0) > 0 || u.isBlocked : true;
+    if (!matchesIssue) return false;
+    if (!q) return true;
+    return [u.name, u.email, u.phone, u.adminNotes]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  });
 
   return (
     <div className="p-4 space-y-4">
@@ -73,6 +95,28 @@ export function CustomerControlTab({
         </button>
       </div>
 
+      <div className="relative">
+        <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Buscar cliente por nombre, correo, teléfono o nota..."
+          aria-label="Buscar clientes"
+          className="w-full min-h-[38px] pl-9 pr-8 py-1.5 rounded-xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-800 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-500"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery("")}
+            aria-label="Limpiar búsqueda de clientes"
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-zinc-400 hover:text-zinc-700"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
       <div className="space-y-2.5">
         {visibleUsers.map((u) => (
           <div
@@ -113,7 +157,80 @@ export function CustomerControlTab({
               </div>
             </div>
 
-            <div className="mt-3 pt-2.5 border-t border-zinc-100 flex items-center justify-between flex-wrap gap-2">
+            <div className="mt-2.5 pt-2 border-t border-zinc-100">
+              {editingNoteUserId === u.id ? (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <input
+                    type="text"
+                    maxLength={500}
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    placeholder="Nota interna privada (ej. Prefiere horario matutino)"
+                    className="flex-1 min-w-[200px] px-3 py-1.5 rounded-xl border border-zinc-300 text-xs bg-white focus:outline-none focus:border-zinc-700"
+                  />
+                  <button
+                    type="button"
+                    disabled={savingNote}
+                    onClick={async () => {
+                      if (!onUpdateCustomerNotes) return;
+                      setSavingNote(true);
+                      try {
+                        await onUpdateCustomerNotes(
+                          u.id,
+                          u.isBlocked,
+                          noteDraft.trim()
+                        );
+                        setEditingNoteUserId(null);
+                      } finally {
+                        setSavingNote(false);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-full bg-[#1F1F23] text-white text-[11px] font-bold"
+                  >
+                    {savingNote ? "Guardando..." : "Guardar nota"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingNoteUserId(null)}
+                    className="px-2.5 py-1.5 rounded-full bg-zinc-100 text-zinc-700 text-[11px] font-semibold"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2 text-[11px] flex-wrap">
+                  <div className="flex items-center gap-1.5 text-zinc-600 min-w-0">
+                    <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                    <span className="truncate">
+                      {u.adminNotes ? (
+                        <>
+                          <b className="text-zinc-800">Nota interna:</b>{" "}
+                          {u.adminNotes}
+                        </>
+                      ) : (
+                        <span className="text-zinc-400 italic">
+                          Sin notas internas
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  {onUpdateCustomerNotes && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingNoteUserId(u.id);
+                        setNoteDraft(u.adminNotes || "");
+                      }}
+                      className="text-[11px] font-bold text-zinc-700 hover:text-black hover:underline shrink-0"
+                    >
+                      {u.adminNotes ? "Editar nota" : "+ Nota interna"}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-2.5 pt-2.5 border-t border-zinc-100 flex items-center justify-between flex-wrap gap-2">
               <div className="flex gap-2">
                 {u.phone && (
                   <>

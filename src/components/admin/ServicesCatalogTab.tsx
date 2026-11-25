@@ -12,6 +12,7 @@ interface ServicesCatalogTabProps {
   onOpenNewService: () => void;
   onOpenEditService: (svc: PortalService, currentStaffIds: string[]) => void;
   onToggleServiceStaff: (svc: PortalService, st: PortalStaffMember) => void;
+  onToggleServiceActive?: (svc: PortalService) => void;
 }
 
 export function ServicesCatalogTab({
@@ -21,6 +22,7 @@ export function ServicesCatalogTab({
   onOpenNewService,
   onOpenEditService,
   onToggleServiceStaff,
+  onToggleServiceActive,
 }: ServicesCatalogTabProps) {
   return (
     <div className="p-4 space-y-4">
@@ -47,14 +49,28 @@ export function ServicesCatalogTab({
               st.services?.some((s) => s.serviceId === svc.id)
           );
 
+          const isArchived = svc.isActive === false;
+          const bufferMin = svc.bufferAfterMin ?? 0;
+
           return (
             <div
               key={svc.id}
-              className="p-4 rounded-3xl border border-zinc-200 bg-white flex flex-col justify-between text-xs shadow-sm hover:border-zinc-300 transition-all gap-3"
+              className={`p-4 rounded-3xl border flex flex-col justify-between text-xs shadow-sm transition-all gap-3 ${
+                isArchived
+                  ? "border-zinc-200 bg-zinc-50/90 opacity-80"
+                  : "border-zinc-200 bg-white hover:border-zinc-300"
+              }`}
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="font-bold text-sm text-zinc-900">{svc.name}</div>
+                  <div className="font-bold text-sm text-zinc-900 flex items-center gap-1.5 flex-wrap">
+                    <span>{svc.name}</span>
+                    {isArchived && (
+                      <span className="px-2 py-0.5 rounded-full bg-zinc-300 text-zinc-800 text-[10px] font-bold">
+                        Archivado
+                      </span>
+                    )}
+                  </div>
                   {svc.description && (
                     <div className="text-zinc-500 text-[11px] mt-0.5 line-clamp-1">
                       {svc.description}
@@ -62,10 +78,11 @@ export function ServicesCatalogTab({
                   )}
                   <div className="text-zinc-500 text-[11px] mt-0.5 font-medium">
                     ⏱️ {svc.durationMin} min
+                    {bufferMin > 0 ? ` + ${bufferMin} min buffer` : ""}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2.5 flex-shrink-0">
+                <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
                   <span className="font-bold text-sm text-zinc-900">
                     {currencySymbol}
                     {svc.price.toFixed(2)}
@@ -82,7 +99,24 @@ export function ServicesCatalogTab({
                   >
                     ✏️ Editar
                   </button>
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                  {onToggleServiceActive && (
+                    <button
+                      type="button"
+                      onClick={() => onToggleServiceActive(svc)}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all ${
+                        isArchived
+                          ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                          : "bg-zinc-200 hover:bg-zinc-300 text-zinc-800"
+                      }`}
+                    >
+                      {isArchived ? "Reactivar" : "Archivar"}
+                    </button>
+                  )}
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      isArchived ? "bg-zinc-400" : "bg-emerald-500"
+                    }`}
+                  />
                 </div>
               </div>
 

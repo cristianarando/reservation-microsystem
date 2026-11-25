@@ -17,6 +17,7 @@ import {
 import { ServiceFormModal } from "./modals/ServiceFormModal";
 import { StaffFormModal } from "./modals/StaffFormModal";
 import { NoShowStrikeModal } from "./modals/NoShowStrikeModal";
+import { WalkInBookingModal } from "./modals/WalkInBookingModal";
 import type {
   PortalAppointment,
   PortalBusinessSettings,
@@ -66,6 +67,14 @@ interface AdminOperationModalsProps {
     customReason?: string
   ) => Promise<void>;
   getWhatsAppNoShowUrl: (apt: PortalAppointment) => string;
+  walkInModalOpen: boolean;
+  setWalkInModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  onRefresh: () => void;
+  showToast: (
+    type: "success" | "error" | "warning" | "info",
+    title: string,
+    message?: string
+  ) => void;
 }
 
 export function AdminOperationModals({
@@ -96,6 +105,10 @@ export function AdminOperationModals({
   setNoShowModalData,
   onStatusChange,
   getWhatsAppNoShowUrl,
+  walkInModalOpen,
+  setWalkInModalOpen,
+  onRefresh,
+  showToast,
 }: AdminOperationModalsProps) {
   return (
     <>
@@ -154,6 +167,19 @@ export function AdminOperationModals({
         settings={settings}
         onStatusChange={onStatusChange}
         getWhatsAppNoShowUrl={getWhatsAppNoShowUrl}
+      />
+
+      <WalkInBookingModal
+        isOpen={walkInModalOpen}
+        onClose={() => setWalkInModalOpen(false)}
+        defaultDateStr={agendaDateStr}
+        defaultStaffId={selectedStaffId}
+        isOwnerAdmin={isOwnerAdmin}
+        staffList={staffList}
+        services={services}
+        settings={settings}
+        onCreated={onRefresh}
+        showToast={showToast}
       />
     </>
   );

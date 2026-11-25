@@ -1,10 +1,39 @@
 "use client";
 
-import React, { useId } from "react";
+import React, { useCallback, useEffect, useId, useState } from "react";
 import dynamic from "next/dynamic";
-import { Save, MapPin, Settings } from "lucide-react";
+import { Bell, Palette, RefreshCw, Save, MapPin, Send, Settings } from "lucide-react";
 import { DEFAULT_BUSINESS_LOGO } from "@/lib/avatars";
+import { getContrastRatio, normalizeHex } from "@/lib/color-utils";
 import type { PortalBusinessSettings } from "@/types/portal";
+
+interface PushQueueMetrics {
+  paused: boolean;
+  deliveries: {
+    pending: number;
+    processing: number;
+    delivered: number;
+    failedPermanent: number;
+    expired: number;
+    skipped: number;
+  };
+  subscriptions: {
+    active: number;
+    expired: number;
+  };
+  oldestPendingAgeSec: number;
+}
+
+const IANA_TIMEZONES = [
+  { value: "America/La_Paz", label: "America/La_Paz (UTC-4 · Bolivia)" },
+  { value: "America/Lima", label: "America/Lima (UTC-5 · Perú)" },
+  { value: "America/Bogota", label: "America/Bogota (UTC-5 · Colombia)" },
+  { value: "America/Santiago", label: "America/Santiago (Chile)" },
+  { value: "America/Argentina/Buenos_Aires", label: "America/Buenos_Aires (UTC-3 · Argentina)" },
+  { value: "America/Mexico_City", label: "America/Mexico_City (México)" },
+  { value: "America/New_York", label: "America/New_York (EE.UU. Este)" },
+  { value: "Europe/Madrid", label: "Europe/Madrid (España)" },
+];
 
 const InteractiveMapPicker = dynamic(
   () => import("@/components/InteractiveMapPicker"),
@@ -49,6 +78,92 @@ export function AdminSettingsTab({
   const horizonId = useId();
   const leadTimeId = useId();
   const cancelHoursId = useId();
+  const slotStepId = useId();
+  const maxActiveId = useId();
+  const timezoneId = useId();
+  const primaryHexId = useId();
+  const surfaceHexId = useId();
+  const pushHideDetailsId = useId();
+
+  const [pushMetrics, setPushMetrics] = useState<PushQueueMetrics | null>(null);
+  const [pushQueueBusy, setPushQueueBusy] = useState(false);
+  const [pushQueueNotice, setPushQueueNotice] = useState<string | null>(null);
+
+  const loadPushMetrics = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/push/dispatch", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (data?.metrics) {
+        setPushMetrics(data.metrics as PushQueueMetrics);
+      }
+    } catch {
+      // ignore transient poll errors
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/push/dispatch", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = await res.json().catch(() => null);
+        if (!cancelled && data?.metrics) {
+          setPushMetrics(data.metrics as PushQueueMetrics);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleDispatchAction = async (
+    action: "dispatch" | "pause" | "resume" | "expire_stale"
+  ) => {
+    setPushQueueBusy(true);
+    setPushQueueNotice(null);
+    try {
+      const res = await fetch("/api/admin/push/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data) {
+        if (data.metrics) {
+          setPushMetrics(data.metrics as PushQueueMetrics);
+        } else {
+          await loadPushMetrics();
+        }
+        setPushQueueNotice(
+          action === "dispatch"
+            ? `Despacho ejecutado (${data.sent ?? 0} enviadas, ${data.failed ?? 0} fallidas).`
+            : action === "pause"
+            ? "Cola Web Push pausada temporalmente."
+            : action === "resume"
+            ? "Cola Web Push reanudada."
+            : "Suscripciones antiguas limpiadas."
+        );
+      } else {
+        setPushQueueNotice(data?.error || "No se pudo ejecutar la acción en la cola.");
+      }
+    } catch {
+      setPushQueueNotice("Error de conexión al consultar la cola Web Push.");
+    } finally {
+      setPushQueueBusy(false);
+    }
+  };
+
+  const primaryHex = normalizeHex(settingsForm?.themePrimaryHex, "#1F1F23");
+  const surfaceHex = normalizeHex(settingsForm?.themeSurfaceHex, "#F4F4F6");
+  const primaryContrast = getContrastRatio(primaryHex, "#FFFFFF");
+  const surfaceContrast = getContrastRatio("#1F1F23", surfaceHex);
+  const currentTimezone = settingsForm?.timezone || "America/La_Paz";
+  const hasKnownTimezone = IANA_TIMEZONES.some((t) => t.value === currentTimezone);
   return (
     <div className="p-4 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -407,6 +522,307 @@ export function AdminSettingsTab({
               </span>
             </div>
           </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="border-[1.5px] border-zinc-300 bg-white rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+              <label
+                htmlFor={slotStepId}
+                className="text-[10px] font-bold text-zinc-600 uppercase block"
+              >
+                Intervalo de Horarios
+              </label>
+              <select
+                id={slotStepId}
+                value={settingsForm?.slotStepMin ?? 30}
+                onChange={(e) =>
+                  onUpdateSettingsForm({
+                    ...settingsForm,
+                    slotStepMin: Number(e.target.value),
+                  })
+                }
+                className="bg-transparent font-medium text-base sm:text-xs text-[#1F1F23] focus:outline-none w-full cursor-pointer"
+              >
+                <option value={15}>Cada 15 minutos</option>
+                <option value={20}>Cada 20 minutos</option>
+                <option value={30}>Cada 30 minutos</option>
+                <option value={45}>Cada 45 minutos</option>
+                <option value={60}>Cada 60 minutos</option>
+              </select>
+              <span className="text-[10px] text-zinc-500 block mt-0.5">
+                Grilla mostrada al reservar
+              </span>
+            </div>
+
+            <div className="border-[1.5px] border-zinc-300 bg-white rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+              <label
+                htmlFor={maxActiveId}
+                className="text-[10px] font-bold text-zinc-600 uppercase block"
+              >
+                Máx. Citas Activas / Cliente
+              </label>
+              <input
+                id={maxActiveId}
+                type="number"
+                min={1}
+                max={10}
+                value={settingsForm?.maxActiveBookings ?? 2}
+                onChange={(e) =>
+                  onUpdateSettingsForm({
+                    ...settingsForm,
+                    maxActiveBookings: Math.max(
+                      1,
+                      Math.min(10, Number(e.target.value) || 2)
+                    ),
+                  })
+                }
+                className="bg-transparent font-medium text-base sm:text-xs text-[#1F1F23] focus:outline-none w-full"
+              />
+              <span className="text-[10px] text-zinc-500 block mt-0.5">
+                Límite simultáneo por paciente
+              </span>
+            </div>
+
+            <div className="border-[1.5px] border-zinc-300 bg-white rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+              <label
+                htmlFor={timezoneId}
+                className="text-[10px] font-bold text-zinc-600 uppercase block"
+              >
+                Zona Horaria (IANA)
+              </label>
+              <select
+                id={timezoneId}
+                value={currentTimezone}
+                onChange={(e) =>
+                  onUpdateSettingsForm({
+                    ...settingsForm,
+                    timezone: e.target.value,
+                  })
+                }
+                className="bg-transparent font-medium text-base sm:text-xs text-[#1F1F23] focus:outline-none w-full cursor-pointer"
+              >
+                {!hasKnownTimezone && (
+                  <option value={currentTimezone}>{currentTimezone}</option>
+                )}
+                {IANA_TIMEZONES.map((tz) => (
+                  <option key={tz.value} value={tz.value}>
+                    {tz.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] text-zinc-500 block mt-0.5">
+                Reloj oficial de citas y turnos
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Dynamic Brand Palette & WCAG Contrast Checker */}
+        <div className="p-4.5 bg-zinc-50 border border-zinc-200 rounded-2xl space-y-3">
+          <div>
+            <h4 className="text-xs font-bold text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+              <Palette className="w-4 h-4 text-zinc-600" />
+              <span>Paleta Dinámica de Marca y Contraste WCAG AA</span>
+            </h4>
+            <p className="text-[11px] text-zinc-500 mt-0.5">
+              Personaliza el color primario de botones y el fondo suave de tarjetas. Se valida contraste ≥ 4.5:1 automáticamente.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="p-3 rounded-2xl bg-white border border-zinc-200 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <label
+                  htmlFor={primaryHexId}
+                  className="text-[10px] font-bold text-zinc-600 uppercase block"
+                >
+                  Color Primario (Botones)
+                </label>
+                <div className="text-xs font-mono font-bold text-zinc-900 mt-0.5">
+                  {primaryHex}
+                </div>
+                <span
+                  className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    primaryContrast >= 4.5
+                      ? "bg-emerald-100 text-emerald-900"
+                      : "bg-amber-100 text-amber-900"
+                  }`}
+                >
+                  Contraste c/ blanco: {primaryContrast.toFixed(1)}:1{" "}
+                  {primaryContrast >= 4.5 ? "✓ AA" : "⚠ Bajo"}
+                </span>
+              </div>
+              <input
+                id={primaryHexId}
+                type="color"
+                value={primaryHex}
+                onChange={(e) =>
+                  onUpdateSettingsForm({
+                    ...settingsForm,
+                    themePrimaryHex: e.target.value.toUpperCase(),
+                  })
+                }
+                className="w-11 h-11 rounded-xl border border-zinc-300 cursor-pointer bg-white p-0.5 shrink-0"
+              />
+            </div>
+
+            <div className="p-3 rounded-2xl bg-white border border-zinc-200 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <label
+                  htmlFor={surfaceHexId}
+                  className="text-[10px] font-bold text-zinc-600 uppercase block"
+                >
+                  Color de Superficie (Tarjetas)
+                </label>
+                <div className="text-xs font-mono font-bold text-zinc-900 mt-0.5">
+                  {surfaceHex}
+                </div>
+                <span
+                  className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    surfaceContrast >= 4.5
+                      ? "bg-emerald-100 text-emerald-900"
+                      : "bg-amber-100 text-amber-900"
+                  }`}
+                >
+                  Contraste texto: {surfaceContrast.toFixed(1)}:1{" "}
+                  {surfaceContrast >= 4.5 ? "✓ AA" : "⚠ Bajo"}
+                </span>
+              </div>
+              <input
+                id={surfaceHexId}
+                type="color"
+                value={surfaceHex}
+                onChange={(e) =>
+                  onUpdateSettingsForm({
+                    ...settingsForm,
+                    themeSurfaceHex: e.target.value.toUpperCase(),
+                  })
+                }
+                className="w-11 h-11 rounded-xl border border-zinc-300 cursor-pointer bg-white p-0.5 shrink-0"
+              />
+            </div>
+          </div>
+
+          <label
+            htmlFor={pushHideDetailsId}
+            className="flex items-start justify-between gap-3 p-3 rounded-2xl bg-white border border-zinc-200 cursor-pointer"
+          >
+            <div>
+              <span className="text-xs font-bold text-zinc-900 block">
+                Modo privacidad en pantalla bloqueada (Notificaciones Push)
+              </span>
+              <span className="text-[11px] text-zinc-500">
+                Si está activo, oculta nombre del cliente y servicio en las alertas Web Push externas y muestra un aviso neutro.
+              </span>
+            </div>
+            <input
+              id={pushHideDetailsId}
+              type="checkbox"
+              checked={Boolean(settingsForm?.pushHideDetails)}
+              onChange={(e) =>
+                onUpdateSettingsForm({
+                  ...settingsForm,
+                  pushHideDetails: e.target.checked,
+                })
+              }
+              className="w-4 h-4 mt-0.5 rounded accent-zinc-900 shrink-0"
+            />
+          </label>
+        </div>
+
+        {/* Web Push Operational Queue Card */}
+        <div className="p-4.5 bg-zinc-50 border border-zinc-200 rounded-2xl space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h4 className="text-xs font-bold text-zinc-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Bell className="w-4 h-4 text-zinc-600" />
+                <span>Cola Operativa Web Push</span>
+              </h4>
+              <p className="text-[11px] text-zinc-500 mt-0.5">
+                Estado en tiempo real de entregas push y recordatorios automáticos.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loadPushMetrics}
+              disabled={pushQueueBusy}
+              className="px-3 py-1 rounded-full bg-white hover:bg-zinc-100 border border-zinc-300 text-[11px] font-bold text-zinc-800 inline-flex items-center gap-1"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Actualizar</span>
+            </button>
+          </div>
+
+          {pushMetrics ? (
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="p-2.5 rounded-2xl bg-white border border-zinc-200">
+                  <span className="text-[10px] text-zinc-500 uppercase font-bold block">
+                    Pendientes
+                  </span>
+                  <span className="font-extrabold text-zinc-900 text-base">
+                    {pushMetrics.deliveries.pending}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white border border-zinc-200">
+                  <span className="text-[10px] text-emerald-700 uppercase font-bold block">
+                    Entregadas
+                  </span>
+                  <span className="font-extrabold text-emerald-900 text-base">
+                    {pushMetrics.deliveries.delivered}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white border border-zinc-200">
+                  <span className="text-[10px] text-amber-700 uppercase font-bold block">
+                    Fallidas / Exp.
+                  </span>
+                  <span className="font-extrabold text-amber-900 text-base">
+                    {pushMetrics.deliveries.failedPermanent +
+                      pushMetrics.deliveries.expired}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-white border border-zinc-200">
+                  <span className="text-[10px] text-zinc-500 uppercase font-bold block">
+                    Dispositivos Activos
+                  </span>
+                  <span className="font-extrabold text-zinc-900 text-base">
+                    {pushMetrics.subscriptions.active}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  disabled={pushQueueBusy}
+                  onClick={() => handleDispatchAction("dispatch")}
+                  className="min-h-[34px] px-3.5 py-1.5 rounded-full bg-[#1F1F23] hover:bg-black text-white text-[11px] font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Send className="w-3 h-3" />
+                  <span>Despachar pendientes</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={pushQueueBusy}
+                  onClick={() =>
+                    handleDispatchAction(pushMetrics.paused ? "resume" : "pause")
+                  }
+                  className="min-h-[34px] px-3 py-1.5 rounded-full bg-white hover:bg-zinc-100 border border-zinc-300 text-[11px] font-bold text-zinc-800 disabled:opacity-50"
+                >
+                  {pushMetrics.paused ? "▶ Reanudar cola" : "⏸ Pausar cola"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-[11px] text-zinc-500">
+              Cargando métricas de la cola push...
+            </div>
+          )}
+
+          {pushQueueNotice && (
+            <div className="text-[11px] font-semibold text-zinc-700 bg-white border border-zinc-200 rounded-xl px-3 py-2">
+              {pushQueueNotice}
+            </div>
+          )}
         </div>
 
         <div className="p-4.5 bg-zinc-50 border border-zinc-200 rounded-3xl space-y-3.5">

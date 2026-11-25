@@ -96,6 +96,44 @@ export function useAdminSettings({
     }
   };
 
+  const handleUpdateCustomerNotes = async (
+    userId: string,
+    currentlyBlocked: boolean,
+    adminNotes: string
+  ) => {
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/toggle-block`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isBlocked: currentlyBlocked,
+          adminNotes,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(
+          "error",
+          "No se pudo guardar la nota",
+          data.error || "Error al actualizar nota interna."
+        );
+        return;
+      }
+      showToast(
+        "success",
+        "Nota interna guardada",
+        "La nota privada del cliente quedó actualizada."
+      );
+      onRefresh();
+    } catch (err: unknown) {
+      showToast(
+        "error",
+        "Error al guardar nota",
+        err instanceof Error ? err.message : "Error inesperado."
+      );
+    }
+  };
+
   const handleResetUserStrikes = async (userId: string) => {
     try {
       const res = await fetch(`/api/admin/users/${userId}/toggle-block`, {
@@ -221,6 +259,7 @@ export function useAdminSettings({
     settingsForm,
     setSettingsForm,
     handleToggleBlockUser,
+    handleUpdateCustomerNotes,
     handleResetUserStrikes,
     handleLogoFileUpload,
     handleSaveSettings,

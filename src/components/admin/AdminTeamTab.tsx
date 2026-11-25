@@ -312,6 +312,24 @@ export function AdminTeamTab({
 
                   <button
                     type="button"
+                    onClick={() =>
+                      onOpenStaffModal({
+                        id: st.id,
+                        displayName: st.displayName,
+                        specialtyTitle: st.specialtyTitle || "",
+                        email: linkedUser?.email || "",
+                        phone: linkedUser?.phone || "",
+                        avatarUrl: st.avatarUrl || DEFAULT_STAFF_AVATAR,
+                        serviceIds: myServiceIds,
+                      })
+                    }
+                    className="px-3 py-1.5 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-[11px] font-bold transition-all shadow-2xs"
+                  >
+                    ✏️ Editar
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => onChangeStaffAvatar(st)}
                     className="px-3 py-1.5 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-[11px] font-bold transition-all shadow-2xs"
                     title="Cambiar a otro icono ilustrado aleatorio"

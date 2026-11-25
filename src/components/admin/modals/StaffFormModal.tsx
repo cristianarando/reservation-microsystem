@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useId } from "react";
+import React, { useId, useState } from "react";
 import { AccessibleModal } from "@/components/ui/AccessibleModal";
 import { Button } from "@/components/ui/Button";
 import { STAFF_AVATAR_PRESETS, getRandomStaffAvatar } from "@/lib/avatars";
+import { compressImageFileToDataUrl } from "@/lib/image-utils";
 import { StaffModalState } from "../AdminTeamTab";
 import type { PortalBusinessSettings, PortalService } from "@/types/portal";
 
@@ -29,10 +30,31 @@ export function StaffFormModal({
   const specialtyTitleId = useId();
   const emailId = useId();
   const phoneId = useId();
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   if (!staffModal) return null;
 
-  const onClose = () => setStaffModal(null);
+  const isEditing = Boolean(staffModal.id);
+  const onClose = () => {
+    setPhotoError(null);
+    setStaffModal(null);
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoError(null);
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file, 256, 0.84);
+      setStaffModal({ ...staffModal, avatarUrl: dataUrl });
+    } catch (err: unknown) {
+      setPhotoError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo procesar la foto seleccionada."
+      );
+    }
+  };
 
   return (
     <AccessibleModal
@@ -43,11 +65,14 @@ export function StaffFormModal({
       className="rounded-[32px] p-5 sm:p-6"
     >
       <h3 id={titleId} className="text-base font-bold text-zinc-900">
-        👨‍⚕️ Agregar Profesional al Equipo
+        {isEditing
+          ? "✏️ Editar Perfil Profesional"
+          : "👨‍⚕️ Agregar Profesional al Equipo"}
       </h3>
       <p className="text-xs text-zinc-500 mt-1">
-        Pre-autoriza el correo de Google del nuevo doctor o empleado. Al iniciar
-        sesión, tendrá acceso restringido solo a su agenda y horarios.
+        {isEditing
+          ? "Actualiza nombre público, especialidad, teléfono, foto y servicios asignados."
+          : "Pre-autoriza el correo de Google del nuevo doctor o empleado. Al iniciar sesión, tendrá acceso restringido solo a su agenda y horarios."}
       </p>
 
       <div className="mt-4 space-y-3 text-xs">
@@ -94,20 +119,23 @@ export function StaffFormModal({
             htmlFor={emailId}
             className="text-[10px] font-bold text-zinc-600 uppercase block"
           >
-            Correo de Google (Para Login del Empleado) *
+            Correo de Google {isEditing ? "(Vinculado)" : "(Para Login del Empleado) *"}
           </label>
           <input
             id={emailId}
             type="email"
+            disabled={isEditing}
             value={staffModal.email}
             onChange={(e) =>
               setStaffModal({ ...staffModal, email: e.target.value })
             }
             placeholder="ejemplo@gmail.com"
-            className="mt-1 w-full p-2.5 rounded-2xl border border-zinc-300 text-base sm:text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
+            className="mt-1 w-full p-2.5 rounded-2xl border border-zinc-300 text-base sm:text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 disabled:bg-zinc-100 disabled:text-zinc-500"
           />
           <span className="text-[10px] text-zinc-500 block mt-0.5">
-            Con este correo ingresará a su panel de atención.
+            {isEditing
+              ? "El correo Google vinculado no se puede reasignar desde aquí."
+              : "Con este correo ingresará a su panel de atención."}
           </span>
         </div>
 
@@ -131,23 +159,52 @@ export function StaffFormModal({
         </div>
 
         <div>
-          <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
             <span className="text-[10px] font-bold text-zinc-600 uppercase block">
-              Icono de Perfil (Estilo Ilustrado)
+              Foto o Avatar de Perfil
             </span>
-            <button
-              type="button"
-              onClick={() =>
-                setStaffModal({
-                  ...staffModal,
-                  avatarUrl: getRandomStaffAvatar(staffModal.avatarUrl),
-                })
-              }
-              className="px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-[10px] font-bold transition-all"
-            >
-              🎲 Aleatorio
-            </button>
+            <div className="flex items-center gap-1.5">
+              <label className="cursor-pointer px-2.5 py-0.5 rounded-full bg-[#1F1F23] hover:bg-black text-white text-[10px] font-bold transition-all">
+                <span>📷 Subir foto</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePhotoUpload}
+                  className="hidden"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  setStaffModal({
+                    ...staffModal,
+                    avatarUrl: getRandomStaffAvatar(staffModal.avatarUrl),
+                  })
+                }
+                className="px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-[10px] font-bold transition-all"
+              >
+                🎲 Aleatorio
+              </button>
+            </div>
           </div>
+          {staffModal.avatarUrl?.startsWith("data:image/") && (
+            <div className="mb-2 flex items-center gap-2 p-2 rounded-2xl bg-zinc-50 border border-zinc-200">
+              {/* eslint-disable-next-line @next/next/no-img-element -- Compressed SQLite DataURL preview */}
+              <img
+                src={staffModal.avatarUrl}
+                alt="Vista previa de foto"
+                className="w-10 h-10 rounded-full object-cover border border-zinc-300"
+              />
+              <span className="text-[11px] font-semibold text-zinc-700">
+                Foto personalizada cargada
+              </span>
+            </div>
+          )}
+          {photoError && (
+            <p className="text-[10px] text-red-700 font-semibold mb-1.5">
+              {photoError}
+            </p>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             {STAFF_AVATAR_PRESETS.map((preset) => (
               <button
@@ -238,7 +295,11 @@ export function StaffFormModal({
           disabled={savingStaff}
           className="flex-1 py-3"
         >
-          {savingStaff ? "Autorizando..." : "Autorizar y Crear Cuenta"}
+          {savingStaff
+            ? "Guardando..."
+            : isEditing
+            ? "Guardar Cambios"
+            : "Autorizar y Crear Cuenta"}
         </Button>
         <Button
           variant="secondary"

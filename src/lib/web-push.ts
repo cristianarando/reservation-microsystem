@@ -12,6 +12,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateSafeExternalUrl } from "@/lib/ssrf-guard";
+import { enqueueDueAppointmentReminders } from "@/lib/services/reminder-service";
 
 export type PushEventType =
   | "APPOINTMENT_CREATED"
@@ -19,6 +20,7 @@ export type PushEventType =
   | "MASS_CANCELLATION"
   | "CUSTOMER_CANCELLED"
   | "APPOINTMENT_RESCHEDULED"
+  | "APPOINTMENT_REMINDER"
   | "TEST_PUSH";
 
 export interface VapidKeys {
@@ -140,9 +142,25 @@ export function startPushDispatcherWorker(intervalMs = 30_000): void {
     });
   }, intervalMs);
 
+  const reminderTimer = setInterval(() => {
+    if (isPushDispatcherPaused()) return;
+    void enqueueDueAppointmentReminders()
+      .then((res) => {
+        if (res.queued24h > 0 || res.queued2h > 0) {
+          void dispatchPendingPushDeliveries({ limit: 30 }).catch(() => {});
+        }
+      })
+      .catch((err) => {
+        console.error("[Reminder Worker] Scan error:", err instanceof Error ? err.message : "unknown");
+      });
+  }, 5 * 60_000);
+
   // Do not block graceful process shutdown
   if (typeof timer.unref === "function") {
     timer.unref();
+  }
+  if (typeof reminderTimer.unref === "function") {
+    reminderTimer.unref();
   }
 }
 

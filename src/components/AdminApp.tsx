@@ -13,6 +13,7 @@ import {
   ConflictDataState,
   VacationModalState,
 } from "./admin/AdminOperationModals";
+import { RescheduleModal } from "./shared/RescheduleModal";
 import { useToastQueue } from "@/hooks/useToastQueue";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useAdminShifts } from "@/hooks/useAdminShifts";
@@ -135,6 +136,10 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
   const [staffModal, setStaffModal] = useState<StaffModalState | null>(null);
   const [noShowModalData, setNoShowModalData] =
     useState<PortalAppointment | null>(null);
+  const [walkInModalOpen, setWalkInModalOpen] = useState(false);
+  const [rescheduleApt, setRescheduleApt] = useState<PortalAppointment | null>(
+    null
+  );
   const [serviceModal, setServiceModal] = useState<ServiceModalDraft | null>(
     null
   );
@@ -580,6 +585,8 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
           onCancelAllDayAppointments={handleConfirmCancelAllDay}
           onStatusChange={actions.handleStatusChange}
           onOpenNoShowModal={setNoShowModalData}
+          onOpenWalkInModal={() => setWalkInModalOpen(true)}
+          onOpenRescheduleModal={setRescheduleApt}
           getWhatsAppCancelUrl={getWhatsAppCancelUrl}
           getWhatsAppNoShowUrl={getWhatsAppNoShowUrl}
         />
@@ -663,6 +670,7 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
             })
           }
           onToggleServiceStaff={actions.handleToggleServiceStaff}
+          onToggleServiceActive={actions.handleToggleServiceActive}
         />
       )}
 
@@ -673,6 +681,7 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
           onChangeFilter={setCustFilter}
           onResetUserStrikes={actions.handleResetUserStrikes}
           onToggleBlockUser={actions.handleToggleBlockUser}
+          onUpdateCustomerNotes={actions.handleUpdateCustomerNotes}
         />
       )}
 
@@ -715,6 +724,21 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
         setNoShowModalData={setNoShowModalData}
         onStatusChange={actions.handleStatusChange}
         getWhatsAppNoShowUrl={getWhatsAppNoShowUrl}
+        walkInModalOpen={walkInModalOpen}
+        setWalkInModalOpen={setWalkInModalOpen}
+        onRefresh={onRefresh}
+        showToast={showToast}
+      />
+
+      <RescheduleModal
+        appointment={rescheduleApt}
+        mode="staff"
+        isOwnerAdmin={isOwnerAdmin}
+        staffList={staffList}
+        settings={settings}
+        onClose={() => setRescheduleApt(null)}
+        onRescheduled={onRefresh}
+        showToast={showToast}
       />
 
       <ToastContainer toasts={toasts} onDismiss={removeToast} />

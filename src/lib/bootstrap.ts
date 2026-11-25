@@ -204,6 +204,7 @@ export async function getBootstrapPayload(
             phone: true,
             isBlocked: true,
             noShowCount: true,
+            adminNotes: true,
           },
         },
       },

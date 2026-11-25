@@ -247,7 +247,9 @@ export function useAdminTeam({
 
   const handleCreateStaff = async () => {
     if (!staffModal) return;
-    const { displayName, specialtyTitle, email, phone, avatarUrl } = staffModal;
+    const { id, displayName, specialtyTitle, email, phone, avatarUrl } =
+      staffModal;
+    const isEditing = Boolean(id);
     if (!displayName || displayName.trim().length < 3) {
       showToast(
         "warning",
@@ -265,7 +267,7 @@ export function useAdminTeam({
       return;
     }
     const emailClean = (email || "").trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean)) {
+    if (!isEditing && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean)) {
       showToast(
         "warning",
         "Correo inválido",
@@ -277,31 +279,44 @@ export function useAdminTeam({
     setSavingStaff(true);
     try {
       const res = await fetch("/api/admin/staff", {
-        method: "POST",
+        method: isEditing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          displayName: displayName.trim(),
-          specialtyTitle: specialtyTitle.trim(),
-          email: emailClean,
-          phone: phone.trim(),
-          avatarUrl: avatarUrl.trim(),
-          serviceIds: staffModal.serviceIds ?? services.map((s) => s.id),
-        }),
+        body: JSON.stringify(
+          isEditing
+            ? {
+                staffId: id,
+                displayName: displayName.trim(),
+                specialtyTitle: specialtyTitle.trim(),
+                phone: phone.trim(),
+                avatarUrl: avatarUrl.trim(),
+                serviceIds: staffModal.serviceIds ?? services.map((s) => s.id),
+              }
+            : {
+                displayName: displayName.trim(),
+                specialtyTitle: specialtyTitle.trim(),
+                email: emailClean,
+                phone: phone.trim(),
+                avatarUrl: avatarUrl.trim(),
+                serviceIds: staffModal.serviceIds ?? services.map((s) => s.id),
+              }
+        ),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         showToast(
           "error",
-          "Error al autorizar",
-          data.error || "No se pudo registrar al profesional"
+          isEditing ? "Error al actualizar" : "Error al autorizar",
+          data.error || "No se pudo guardar al profesional"
         );
         return;
       }
       setStaffModal(null);
       showToast(
         "success",
-        "¡Profesional Autorizado!",
-        `Cuenta de ${displayName} habilitada con éxito para ${emailClean}. Ya puede iniciar sesión.`
+        isEditing ? "¡Perfil Actualizado!" : "¡Profesional Autorizado!",
+        isEditing
+          ? `Los datos y foto de ${displayName.trim()} fueron actualizados.`
+          : `Cuenta de ${displayName} habilitada con éxito para ${emailClean}. Ya puede iniciar sesión.`
       );
       onRefresh();
     } catch (err: unknown) {

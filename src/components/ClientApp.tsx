@@ -18,6 +18,7 @@ import { BookingStepConfirm } from "@/components/client/BookingStepConfirm";
 import { BookingStepSuccess } from "@/components/client/BookingStepSuccess";
 import { ClientMyAppointmentsTab } from "@/components/client/ClientMyAppointmentsTab";
 import { ClientAuthModal } from "@/components/client/ClientAuthModal";
+import { RescheduleModal } from "@/components/shared/RescheduleModal";
 import { useToastQueue } from "@/hooks/useToastQueue";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useCustomerHistory } from "@/hooks/useCustomerHistory";
@@ -78,6 +79,9 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
   const [highlightedAppointmentId, setHighlightedAppointmentId] = useState<
     string | null
   >(null);
+  const [rescheduleApt, setRescheduleApt] = useState<PortalAppointment | null>(
+    null
+  );
   const pendingDeepLinkRef = useRef<{
     tab?: "book" | "my-appointments";
     appointmentId?: string | null;
@@ -980,6 +984,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
           {step === 5 && confirmedAppointment && (
             <BookingStepSuccess
               confirmedAppointment={confirmedAppointment}
+              settings={settings}
               timezone={settings?.timezone}
               pushState={pushState}
               pushBusy={pushBusy}
@@ -1031,9 +1036,20 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
           }}
           onAcknowledgeMove={handleAcknowledgeMove}
           onCancelAppointment={handleCancelAppointment}
+          onRescheduleAppointment={setRescheduleApt}
           onRepeatService={handleRepeatService}
         />
       )}
+
+      <RescheduleModal
+        appointment={rescheduleApt}
+        mode="customer"
+        staffList={staffList}
+        settings={settings}
+        onClose={() => setRescheduleApt(null)}
+        onRescheduled={onRefresh}
+        showToast={showToast}
+      />
 
       <CancellationPolicyModal
         policyModal={policyModal}

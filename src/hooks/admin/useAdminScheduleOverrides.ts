@@ -113,6 +113,7 @@ export function useAdminScheduleOverrides({
           startAt: startAt.toISOString(),
           endAt: endAt.toISOString(),
           reason: imprevistoModal.reason || "Imprevisto de agenda",
+          publicNote: imprevistoModal.publicNote?.trim() || undefined,
           resolution,
         }),
       });
@@ -230,6 +231,7 @@ export function useAdminScheduleOverrides({
           startAt: startAt.toISOString(),
           endAt: endAt.toISOString(),
           reason: vacationModal.reason.trim() || null,
+          publicNote: vacationModal.publicNote?.trim() || undefined,
           resolution: resolution || (conflictData ? "CANCEL_ALL" : undefined),
         }),
       });

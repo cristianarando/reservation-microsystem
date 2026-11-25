@@ -7,11 +7,16 @@ import {
   Sunset,
   Coffee,
   Calendar,
+  CalendarClock,
+  CalendarPlus,
   Clock,
+  Download,
   Pencil,
   Phone,
   FileText,
   Check,
+  Search,
+  X,
 } from "lucide-react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
@@ -79,6 +84,8 @@ interface AdminAgendaTabProps {
     customReason?: string
   ) => Promise<void> | void;
   onOpenNoShowModal: (apt: PortalAppointment) => void;
+  onOpenWalkInModal?: () => void;
+  onOpenRescheduleModal?: (apt: PortalAppointment) => void;
   getWhatsAppCancelUrl: (apt: PortalAppointment) => string;
   getWhatsAppNoShowUrl: (apt: PortalAppointment) => string;
 }
@@ -106,10 +113,13 @@ export function AdminAgendaTab({
   onCancelAllDayAppointments,
   onStatusChange,
   onOpenNoShowModal,
+  onOpenWalkInModal,
+  onOpenRescheduleModal,
   getWhatsAppCancelUrl,
   getWhatsAppNoShowUrl,
 }: AdminAgendaTabProps) {
   const [mutatingAptId, setMutatingAptId] = useState<string | null>(null);
+  const [agendaSearch, setAgendaSearch] = useState("");
   const businessTz = resolveBusinessTimeZone(settings?.timezone);
   const now = referenceNowIso ? new Date(referenceNowIso) : new Date();
   const todayStr = formatLocalDateYYYYMMDD(now, businessTz);
@@ -205,14 +215,87 @@ export function AdminAgendaTab({
   const pendingDayApts = dayAppointments.filter(
     (a) => a.status === "CONFIRMED" || a.status === "RESCHEDULED_BY_STAFF"
   );
+  const completedDayApts = dayAppointments.filter((a) => a.status === "COMPLETED");
+  const lostDayApts = dayAppointments.filter(
+    (a) => a.status === "CANCELLED" || a.status === "NO_SHOW"
+  );
+  const expectedRevenue = [...completedDayApts, ...pendingDayApts].reduce(
+    (sum, a) => sum + Number(a.priceSnapshot ?? a.service?.price ?? 0),
+    0
+  );
+  const currencySymbol = settings?.currencySymbol || "Bs";
 
+  const normalizedQuery = agendaSearch.trim().toLowerCase();
   const filteredApts = dayAppointments.filter((a) => {
-    if (adminAptFilter === "pending")
-      return a.status === "CONFIRMED" || a.status === "RESCHEDULED_BY_STAFF";
-    if (adminAptFilter === "completed") return a.status === "COMPLETED";
-    if (adminAptFilter === "noshow") return a.status === "NO_SHOW";
-    return true;
+    const matchesStatus =
+      adminAptFilter === "pending"
+        ? a.status === "CONFIRMED" || a.status === "RESCHEDULED_BY_STAFF"
+        : adminAptFilter === "completed"
+        ? a.status === "COMPLETED"
+        : adminAptFilter === "noshow"
+        ? a.status === "NO_SHOW"
+        : true;
+    if (!matchesStatus) return false;
+    if (!normalizedQuery) return true;
+    const haystack = [
+      a.customer?.name,
+      a.customer?.phone,
+      a.customer?.email,
+      a.service?.name,
+      a.customerNotes,
+      a.id,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(normalizedQuery);
   });
+
+  const handleExportCsv = () => {
+    const csvCell = (val: unknown) => {
+      const s = String(val ?? "").replace(/\r?\n/g, " ");
+      const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
+    const headers = [
+      "Fecha",
+      "Hora",
+      "Cliente",
+      "Teléfono",
+      "Correo",
+      "Servicio",
+      "Profesional",
+      "Estado",
+      "Sobrecupo",
+      `Precio (${currencySymbol})`,
+      "Nota cliente",
+    ];
+    const rows = dayAppointments.map((a) => [
+      agendaDateStr,
+      formatSpanishTimeInTz(new Date(a.startAt), businessTz),
+      a.customer?.name || "Cliente",
+      a.customer?.phone || "",
+      a.customer?.email || "",
+      a.service?.name || "",
+      a.staff?.displayName || "",
+      a.status,
+      a.isOverbooking ? "Sí" : "No",
+      Number(a.priceSnapshot ?? a.service?.price ?? 0),
+      a.customerNotes || "",
+    ]);
+    const csvContent =
+      "\uFEFF" +
+      [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `agenda-${agendaDateStr}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const otherStaffActiveApts =
     isOwnerAdmin && selectedStaffId && selectedStaffId !== "ALL"
@@ -616,10 +699,46 @@ export function AdminAgendaTab({
 
       {/* Appointments List */}
       <div className="space-y-3 pt-2">
+        {/* Daily KPI Strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="p-2.5 rounded-2xl bg-zinc-50 border border-zinc-200">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+              Pendientes
+            </div>
+            <div className="text-lg font-extrabold text-[#1F1F23] mt-0.5">
+              {pendingDayApts.length}
+            </div>
+          </div>
+          <div className="p-2.5 rounded-2xl bg-emerald-50/70 border border-emerald-200">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+              Atendidas
+            </div>
+            <div className="text-lg font-extrabold text-emerald-900 mt-0.5">
+              {completedDayApts.length}
+            </div>
+          </div>
+          <div className="p-2.5 rounded-2xl bg-amber-50/70 border border-amber-200">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+              Canceladas / Faltas
+            </div>
+            <div className="text-lg font-extrabold text-amber-950 mt-0.5">
+              {lostDayApts.length}
+            </div>
+          </div>
+          <div className="p-2.5 rounded-2xl bg-zinc-900 text-white border border-zinc-800">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-300">
+              Ingresos estimados
+            </div>
+            <div className="text-lg font-extrabold mt-0.5">
+              {currencySymbol} {expectedRevenue.toFixed(0)}
+            </div>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5 flex-wrap">
+          <h3 className="text-xs font-bold text-zinc-600 uppercase tracking-wider flex items-center gap-1.5 flex-wrap">
             <span>Citas de la Fecha ({dayAppointments.length})</span>
-            <span className="text-[11px] font-semibold text-zinc-400 normal-case">
+            <span className="text-[11px] font-semibold text-zinc-500 normal-case">
               •{" "}
               {selectedStaffId === "ALL"
                 ? "Todo el equipo"
@@ -628,13 +747,60 @@ export function AdminAgendaTab({
             </span>
           </h3>
 
-          {pendingDayApts.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {onOpenWalkInModal && (
+              <button
+                type="button"
+                onClick={onOpenWalkInModal}
+                className="min-h-[34px] px-3 py-1 rounded-full bg-[#1F1F23] hover:bg-black text-white text-[11px] font-bold inline-flex items-center gap-1.5 shadow-sm transition-all"
+              >
+                <CalendarPlus className="w-3.5 h-3.5" />
+                <span>+ Nueva cita</span>
+              </button>
+            )}
+
+            {dayAppointments.length > 0 && (
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="min-h-[34px] px-3 py-1 rounded-full bg-white hover:bg-zinc-100 text-zinc-800 border border-zinc-300 text-[11px] font-bold inline-flex items-center gap-1.5 transition-all"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Exportar CSV</span>
+              </button>
+            )}
+
+            {pendingDayApts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onCancelAllDayAppointments(pendingDayApts)}
+                className="min-h-[34px] px-3 py-1 rounded-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[11px] font-bold transition-all shadow-2xs"
+              >
+                ✕ Cancelar todas ({pendingDayApts.length})
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Instant Search */}
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="search"
+            value={agendaSearch}
+            onChange={(e) => setAgendaSearch(e.target.value)}
+            placeholder="Buscar cliente, teléfono, servicio o nota en esta fecha..."
+            aria-label="Buscar citas en la fecha seleccionada"
+            className="w-full min-h-[38px] pl-9 pr-8 py-1.5 rounded-xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-800 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-500"
+          />
+          {agendaSearch && (
             <button
               type="button"
-              onClick={() => onCancelAllDayAppointments(pendingDayApts)}
-              className="px-3 py-1 rounded-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[11px] font-bold transition-all shadow-2xs"
+              onClick={() => setAgendaSearch("")}
+              aria-label="Limpiar búsqueda"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-zinc-400 hover:text-zinc-700"
             >
-              ✕ Cancelar todas las de esta fecha ({pendingDayApts.length})
+              <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
@@ -816,6 +982,11 @@ export function AdminAgendaTab({
                         🩺 {apt.staff?.displayName}
                       </span>
                     )}
+                    {apt.isOverbooking && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-300">
+                        ⚡ Sobrecupo
+                      </span>
+                    )}
                   </div>
 
                   <span
@@ -892,9 +1063,26 @@ export function AdminAgendaTab({
                   </div>
                 )}
 
+                {apt.customer?.adminNotes && (
+                  <div className="p-2 rounded-xl bg-amber-50/70 border border-amber-200 text-[11px] text-amber-950">
+                    <span className="font-bold">Nota interna cliente:</span>{" "}
+                    {apt.customer.adminNotes}
+                  </div>
+                )}
+
                 <div className="pt-2 border-t border-zinc-100 flex items-center justify-end gap-2 flex-wrap">
                   {isPending && (
                     <>
+                      {onOpenRescheduleModal && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenRescheduleModal(apt)}
+                          className="px-3 py-1.5 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-xs font-bold flex items-center gap-1 transition-all"
+                        >
+                          <CalendarClock className="w-3.5 h-3.5" />
+                          <span>Reprogramar</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => onStatusChange(apt.id, "COMPLETED")}
                         className="px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 shadow-sm transition-all"

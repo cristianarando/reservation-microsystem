@@ -141,8 +141,47 @@ export function useAdminCatalog({
     }
   };
 
+  const handleToggleServiceActive = async (serviceObj: PortalService) => {
+    if (!serviceObj?.id) return;
+    const nextActive = serviceObj.isActive === false;
+    try {
+      const res = await fetch("/api/admin/services", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: serviceObj.id,
+          isActive: nextActive,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(
+          "error",
+          "No se pudo actualizar",
+          data.error || "Error al cambiar estado del servicio."
+        );
+        return;
+      }
+      showToast(
+        nextActive ? "success" : "info",
+        nextActive ? "Servicio reactivado" : "Servicio archivado",
+        nextActive
+          ? `"${serviceObj.name}" vuelve a estar disponible para reservas.`
+          : `"${serviceObj.name}" fue ocultado del portal público sin perder su historial.`
+      );
+      onRefresh();
+    } catch (err: unknown) {
+      showToast(
+        "error",
+        "Error",
+        err instanceof Error ? err.message : "Error inesperado."
+      );
+    }
+  };
+
   return {
     handleToggleServiceStaff,
+    handleToggleServiceActive,
     handleSaveService,
   };
 }

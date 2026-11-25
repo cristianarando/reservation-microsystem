@@ -14,6 +14,7 @@ export interface VacationModalState {
   startDate: string;
   endDate: string;
   reason: string;
+  publicNote?: string;
 }
 
 interface VacationModalProps {
@@ -42,6 +43,7 @@ export function VacationModal({
   const startInputId = useId();
   const endInputId = useId();
   const reasonInputId = useId();
+  const publicNoteInputId = useId();
 
   if (!vacationModal.open) return null;
 
@@ -172,7 +174,7 @@ export function VacationModal({
             htmlFor={reasonInputId}
             className="text-[10px] font-bold text-zinc-500 uppercase block mb-1"
           >
-            Motivo / Nota (Opcional · visible para pacientes)
+            Motivo interno (Opcional)
           </label>
           <input
             id={reasonInputId}
@@ -184,7 +186,29 @@ export function VacationModal({
                 reason: e.target.value,
               })
             }
-            placeholder="Ej. Vacaciones de verano / Viaje / Congreso"
+            placeholder="Ej. Vacaciones de verano / Congreso"
+            className="w-full p-2.5 rounded-2xl border border-zinc-300 text-base sm:text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor={publicNoteInputId}
+            className="text-[10px] font-bold text-zinc-500 uppercase block mb-1"
+          >
+            Nota pública para pacientes (Opcional)
+          </label>
+          <input
+            id={publicNoteInputId}
+            type="text"
+            value={vacationModal.publicNote || ""}
+            onChange={(e) =>
+              setVacationModal({
+                ...vacationModal,
+                publicNote: e.target.value,
+              })
+            }
+            placeholder="Ej. Retornamos el lunes con horario habitual"
             className="w-full p-2.5 rounded-2xl border border-zinc-300 text-base sm:text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
           />
         </div>

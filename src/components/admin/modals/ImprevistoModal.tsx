@@ -21,6 +21,7 @@ export interface ImprevistoModalState {
   type: "LATE_START" | "EARLY_LEAVE" | "FULL_DAY_OFF";
   timeStr: string;
   reason: string;
+  publicNote?: string;
   staffId?: string;
 }
 
@@ -53,6 +54,7 @@ export function ImprevistoModal({
   const staffSelectId = useId();
   const timeInputId = useId();
   const reasonInputId = useId();
+  const publicNoteInputId = useId();
 
   if (!imprevistoModal.open) return null;
 
@@ -317,7 +319,7 @@ export function ImprevistoModal({
             htmlFor={reasonInputId}
             className="text-[10px] font-bold text-zinc-500 uppercase block"
           >
-            Motivo (Visible si hay que avisar a pacientes)
+            Motivo interno
           </label>
           <input
             id={reasonInputId}
@@ -331,6 +333,29 @@ export function ImprevistoModal({
               })
             }
             placeholder="Ej. Cumpleaños / Trámite personal"
+            className="mt-1 w-full p-2.5 rounded-2xl border border-zinc-300 text-base sm:text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 disabled:bg-zinc-100 disabled:text-zinc-500 disabled:cursor-not-allowed"
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor={publicNoteInputId}
+            className="text-[10px] font-bold text-zinc-500 uppercase block"
+          >
+            Nota pública para pacientes (Opcional)
+          </label>
+          <input
+            id={publicNoteInputId}
+            type="text"
+            disabled={modalValidation.status.isDayClosedAlready}
+            value={imprevistoModal.publicNote || ""}
+            onChange={(e) =>
+              setImprevistoModal({
+                ...imprevistoModal,
+                publicNote: e.target.value,
+              })
+            }
+            placeholder="Ej. Atención solo por la tarde"
             className="mt-1 w-full p-2.5 rounded-2xl border border-zinc-300 text-base sm:text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 disabled:bg-zinc-100 disabled:text-zinc-500 disabled:cursor-not-allowed"
           />
         </div>

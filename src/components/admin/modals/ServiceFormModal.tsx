@@ -30,7 +30,9 @@ export function ServiceFormModal({
   const nameId = useId();
   const descId = useId();
   const durationId = useId();
+  const bufferId = useId();
   const priceId = useId();
+  const activeId = useId();
   const [submitting, setSubmitting] = useState(false);
 
   if (!serviceModal) return null;
@@ -108,7 +110,7 @@ export function ServiceFormModal({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div>
             <label
               htmlFor={durationId}
@@ -124,6 +126,29 @@ export function ServiceFormModal({
                 setServiceModal({
                   ...serviceModal,
                   durationMin: Number(e.target.value),
+                })
+              }
+              className="mt-1 w-full p-2.5 rounded-2xl border border-zinc-300 font-bold text-base sm:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor={bufferId}
+              className="text-[10px] font-bold text-zinc-500 uppercase block"
+            >
+              Buffer post-cita (min)
+            </label>
+            <input
+              id={bufferId}
+              type="number"
+              min={0}
+              max={120}
+              step={5}
+              value={serviceModal.bufferAfterMin ?? 0}
+              onChange={(e) =>
+                setServiceModal({
+                  ...serviceModal,
+                  bufferAfterMin: Math.max(0, Math.min(120, Number(e.target.value) || 0)),
                 })
               }
               className="mt-1 w-full p-2.5 rounded-2xl border border-zinc-300 font-bold text-base sm:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
@@ -151,6 +176,34 @@ export function ServiceFormModal({
             />
           </div>
         </div>
+
+        {serviceModal.id && (
+          <label
+            htmlFor={activeId}
+            className="flex items-center justify-between p-2.5 rounded-2xl bg-zinc-50 border border-zinc-200 cursor-pointer"
+          >
+            <div>
+              <span className="text-xs font-bold text-zinc-800 block">
+                Servicio activo en catálogo público
+              </span>
+              <span className="text-[10px] text-zinc-500">
+                Desmárcalo para archivarlo temporalmente sin borrar historial.
+              </span>
+            </div>
+            <input
+              id={activeId}
+              type="checkbox"
+              checked={serviceModal.isActive ?? true}
+              onChange={(e) =>
+                setServiceModal({
+                  ...serviceModal,
+                  isActive: e.target.checked,
+                })
+              }
+              className="w-4 h-4 rounded accent-zinc-900"
+            />
+          </label>
+        )}
 
         <div className="pt-2 border-t border-zinc-200">
           <div className="flex items-center justify-between mb-1.5">

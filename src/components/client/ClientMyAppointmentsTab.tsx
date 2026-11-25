@@ -1,9 +1,24 @@
 "use client";
 
-import React from "react";
-import { Calendar, Clock, FileText, User } from "lucide-react";
+import React, { useState } from "react";
+import {
+  Calendar,
+  CalendarClock,
+  CalendarPlus,
+  Clock,
+  Download,
+  FileText,
+  QrCode,
+  User,
+} from "lucide-react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { PushNotificationToggle } from "@/components/ui/PushNotificationToggle";
+import {
+  buildAppointmentIcsContent,
+  buildGoogleCalendarUrl,
+  downloadAppointmentIcs,
+} from "@/lib/calendar-export";
+import { renderQrSvgDataUrl } from "@/lib/qr-svg";
 import {
   isPastUntickedAppointment,
   isUpcomingActiveAppointment,
@@ -47,6 +62,7 @@ interface ClientMyAppointmentsTabProps {
   onBookNow: () => void;
   onAcknowledgeMove: (aptOrId: PortalAppointment | string) => void;
   onCancelAppointment: (aptId: string) => void;
+  onRescheduleAppointment?: (apt: PortalAppointment) => void;
   onRepeatService: (apt: PortalAppointment) => void;
 }
 
@@ -77,8 +93,10 @@ export function ClientMyAppointmentsTab({
   onBookNow,
   onAcknowledgeMove,
   onCancelAppointment,
+  onRescheduleAppointment,
   onRepeatService,
 }: ClientMyAppointmentsTabProps) {
+  const [expandedQrId, setExpandedQrId] = useState<string | null>(null);
   const businessTz = resolveBusinessTimeZone(settings?.timezone);
   const listNow = referenceNowIso ? new Date(referenceNowIso) : new Date();
   const activeApts = userAppointments.filter((a) =>
@@ -350,47 +368,156 @@ export function ClientMyAppointmentsTab({
                       </div>
                     )}
 
-                    {!isPast && (
-                      <div className="mt-3 pt-2.5 border-t border-zinc-200 flex items-center justify-between flex-wrap gap-2">
-                        <div className="flex items-center gap-3">
-                          {isRescheduled && (
+                    {!isPast && (() => {
+                      const startDate = new Date(apt.startAt);
+                      const endDate = new Date(
+                        apt.endAt ||
+                          startDate.getTime() + (apt.service?.durationMin || 30) * 60_000
+                      );
+                      const refCode = apt.id.slice(-8).toUpperCase();
+                      const businessLabel = settings?.name || "Mi Reserva";
+                      const calTitle = `${apt.service?.name || "Cita"} — ${businessLabel}`;
+                      const calDetails = [
+                        `${settings?.staffLabel || "Profesional"}: ${apt.staff?.displayName || "Por asignar"}`,
+                        `Código de cita: #${refCode}`,
+                        apt.customerNotes ? `Nota: ${apt.customerNotes}` : "",
+                      ]
+                        .filter(Boolean)
+                        .join("\n");
+                      const gcalUrl = buildGoogleCalendarUrl({
+                        title: calTitle,
+                        startAt: startDate,
+                        endAt: endDate,
+                        details: calDetails,
+                        location: settings?.addressText,
+                      });
+                      const isQrOpen = expandedQrId === apt.id;
+                      const qrPayload = `REF:${refCode}|${formatSpanishDateInTz(startDate, businessTz)}|${formatSpanishTimeInTz(startDate, businessTz)}`;
+
+                      return (
+                        <div className="mt-3 pt-2.5 border-t border-zinc-200 space-y-2.5">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center flex-wrap gap-2">
+                              {isRescheduled && (
+                                <button
+                                  type="button"
+                                  onClick={() => onAcknowledgeMove(apt)}
+                                  className="min-h-[36px] text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-full transition-all"
+                                >
+                                  ✓ Confirmar horario
+                                </button>
+                              )}
+                              {apt.canReschedule && onRescheduleAppointment && (
+                                <button
+                                  type="button"
+                                  onClick={() => onRescheduleAppointment(apt)}
+                                  className="min-h-[36px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-900 hover:bg-black text-white text-xs font-bold transition-all"
+                                >
+                                  <CalendarClock className="w-3.5 h-3.5" />
+                                  <span>Reprogramar</span>
+                                </button>
+                              )}
+                              {apt.canCancel ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onCancelAppointment(apt.id)}
+                                  className="min-h-[36px] px-2 text-xs text-red-700 font-bold hover:underline"
+                                >
+                                  {apt.isFreeCancellationBecauseOfStaff
+                                    ? "Cancelar sin penalización"
+                                    : "Cancelar cita"}
+                                </button>
+                              ) : (
+                                <span className="text-xs text-zinc-600">
+                                  No cancelable ({settings?.minCancelNoticeHours}h mín.)
+                                </span>
+                              )}
+                            </div>
+
+                            {settings?.phoneWhatsapp && (
+                              <a
+                                href={`https://wa.me/${settings.phoneWhatsapp.replace(/\D/g, "")}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="min-h-[36px] text-xs font-bold text-[#1F1F23] flex items-center gap-1 hover:underline"
+                              >
+                                <WhatsAppIcon className="w-4 h-4 text-[#16A34A]" />
+                                <span>WhatsApp</span>
+                              </a>
+                            )}
+                          </div>
+
+                          <div className="flex items-center flex-wrap gap-1.5">
                             <button
                               type="button"
-                              onClick={() => onAcknowledgeMove(apt)}
-                              className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded-full transition-all"
+                              aria-expanded={isQrOpen}
+                              onClick={() =>
+                                setExpandedQrId(isQrOpen ? null : apt.id)
+                              }
+                              className="min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white hover:bg-zinc-100 border border-zinc-300 text-[11px] font-bold text-zinc-800 transition-all"
                             >
-                              ✓ Confirmar horario
+                              <QrCode className="w-3.5 h-3.5" />
+                              <span>{isQrOpen ? "Ocultar QR" : "Pase QR"}</span>
                             </button>
-                          )}
-                          {apt.canCancel ? (
+                            <a
+                              href={gcalUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white hover:bg-zinc-100 border border-zinc-300 text-[11px] font-bold text-zinc-800 transition-all"
+                            >
+                              <CalendarPlus className="w-3.5 h-3.5" />
+                              <span>Google Calendar</span>
+                            </a>
                             <button
-                              onClick={() => onCancelAppointment(apt.id)}
-                              className="text-xs text-red-600 font-bold hover:underline"
+                              type="button"
+                              onClick={() => {
+                                const ics = buildAppointmentIcsContent({
+                                  uid: apt.id,
+                                  title: calTitle,
+                                  startAt: startDate,
+                                  endAt: endDate,
+                                  description: calDetails,
+                                  location: settings?.addressText,
+                                  organizerName: settings?.name,
+                                });
+                                downloadAppointmentIcs(`cita-${refCode.toLowerCase()}.ics`, ics);
+                              }}
+                              className="min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white hover:bg-zinc-100 border border-zinc-300 text-[11px] font-bold text-zinc-800 transition-all"
                             >
-                              {apt.isFreeCancellationBecauseOfStaff
-                                ? "Cancelar sin penalización"
-                                : "Cancelar cita"}
+                              <Download className="w-3.5 h-3.5" />
+                              <span>.ics</span>
                             </button>
-                          ) : (
-                            <span className="text-xs text-zinc-600">
-                              No cancelable ({settings?.minCancelNoticeHours}h mín.)
-                            </span>
+                          </div>
+
+                          {isQrOpen && (
+                            <div className="p-3 rounded-2xl bg-white border border-zinc-200 flex items-center gap-3">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={renderQrSvgDataUrl(qrPayload, 2)}
+                                alt={`Código QR de la cita ${refCode}`}
+                                width={88}
+                                height={88}
+                                className="w-20 h-20 rounded-lg border border-zinc-200 bg-white shrink-0"
+                              />
+                              <div className="text-[11px] text-zinc-600 space-y-0.5 min-w-0">
+                                <div className="font-bold text-zinc-900">
+                                  Pase Digital #{refCode}
+                                </div>
+                                <p className="leading-snug">
+                                  Preséntalo en recepción al llegar.
+                                  {typeof apt.remainingReschedules === "number" && (
+                                    <span className="block text-zinc-500 mt-0.5">
+                                      Reprogramaciones disponibles:{" "}
+                                      <b>{apt.remainingReschedules}</b>
+                                    </span>
+                                  )}
+                                </p>
+                              </div>
+                            </div>
                           )}
                         </div>
-
-                        {settings?.phoneWhatsapp && (
-                          <a
-                            href={`https://wa.me/${settings.phoneWhatsapp.replace(/\D/g, "")}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs font-bold text-[#1F1F23] flex items-center gap-1 hover:underline"
-                          >
-                            <WhatsAppIcon className="w-4 h-4 text-[#16A34A]" />
-                            <span>WhatsApp</span>
-                          </a>
-                        )}
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })}
