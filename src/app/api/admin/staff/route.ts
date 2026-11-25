@@ -18,6 +18,7 @@ import {
   sanitizeImageOrDataUrl,
 } from "@/lib/validation/input-validators";
 import { getRandomStaffAvatar } from "@/lib/avatars";
+import { emitRealtimeEvent } from "@/lib/realtime-events";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
@@ -247,6 +248,12 @@ export async function POST(req: Request) {
       return { newStaff, staffUser, requiresVerification };
     });
 
+    emitRealtimeEvent({
+      type: "SCHEDULE_UPDATED",
+      staffId: result.newStaff.id,
+      actorUserId: auth.user.id,
+    });
+
     return NextResponse.json({
       ok: true,
       staff: result.newStaff,
@@ -447,6 +454,12 @@ export async function PATCH(req: Request) {
       });
     });
 
+    emitRealtimeEvent({
+      type: "SCHEDULE_UPDATED",
+      staffId: updated.id,
+      actorUserId: user.id,
+    });
+
     return NextResponse.json({
       ok: true,
       staff: sanitizeStaffForViewer(updated, { role: user.role, userId: user.id }),
@@ -523,6 +536,12 @@ export async function DELETE(req: Request) {
           data: { status: "REVOKED" },
         });
       }
+    });
+
+    emitRealtimeEvent({
+      type: "SCHEDULE_UPDATED",
+      staffId,
+      actorUserId: user.id,
     });
 
     return NextResponse.json({ ok: true });

@@ -7,6 +7,7 @@ import {
   safeErrorResponse,
   verifySameOrigin,
 } from "@/lib/api-guard";
+import { emitRealtimeEvent } from "@/lib/realtime-events";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +109,11 @@ export async function POST(req: Request) {
       }
 
       return created;
+    });
+
+    emitRealtimeEvent({
+      type: "SCHEDULE_UPDATED",
+      actorUserId: auth.user.id,
     });
 
     return NextResponse.json({ ok: true, service: newService });
@@ -252,8 +258,21 @@ export async function PUT(req: Request) {
       return svc;
     });
 
+    emitRealtimeEvent({
+      type: "SCHEDULE_UPDATED",
+      actorUserId: auth.user.id,
+    });
+
     return NextResponse.json({ ok: true, service: updated });
   } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2025"
+    ) {
+      return NextResponse.json({ error: "Servicio no encontrado." }, { status: 404 });
+    }
     return safeErrorResponse(error, "No se pudo actualizar el servicio.");
   }
 }

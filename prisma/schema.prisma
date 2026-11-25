@@ -25,6 +25,8 @@ model BusinessSettings {
   minCancelNoticeHours   Int      @default(6)             // Advance notice required for customer cancellation
   themePrimaryHex        String   @default("#1F1F23")     // Primary theme brand color
   themeSurfaceHex        String   @default("#9FA0A6")     // Secondary surface color
+  timezone               String   @default("America/La_Paz") // Business IANA timezone
+  pushHideDetails        Boolean  @default(false)         // Optional discrete lock-screen push mode
   updatedAt              DateTime @updatedAt
 }
 
@@ -58,7 +60,7 @@ model User {
 model StaffProfile {
   id                  String         @id @default(cuid())
   userId              String?        @unique
-  user                User?          @relation(fields: [userId], references: [id])
+  user                User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
   displayName         String
   specialtyTitle      String         @default("Especialista")
   avatarUrl           String?
@@ -122,33 +124,39 @@ model TimeOff {
 }
 
 model Appointment {
-  id                  String       @id @default(cuid())
-  customerId          String
-  customer            User         @relation(fields: [customerId], references: [id])
-  staffId             String
-  staff               StaffProfile @relation(fields: [staffId], references: [id])
-  serviceId           String
-  service             Service      @relation(fields: [serviceId], references: [id])
+  id                      String       @id @default(cuid())
+  customerId              String
+  customer                User         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  staffId                 String
+  staff                   StaffProfile @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  serviceId               String
+  service                 Service      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
-  startAt             DateTime
-  endAt               DateTime     // startAt + durationMin + bufferAfterMin
-  status              String       @default("CONFIRMED") 
+  startAt                 DateTime
+  endAt                   DateTime     // startAt + durationMin + bufferAfterMin
+  status                  String       @default("CONFIRMED")
   // Statuses: "CONFIRMED" | "RESCHEDULED_BY_STAFF" | "COMPLETED" | "CANCELLED" | "NO_SHOW" | "NO_SHOW_ARCHIVED"
 
-  previousStartAt     DateTime?    // Original timestamp if rescheduled by staff
-  staffMoveReason     String?      // Operational note explaining rescheduling
-  allowFreeCancel     Boolean      @default(false) // Penalty-free cancel if modified by staff
-  rescheduleVersion   Int          @default(0)     // Monotonic counter incremented on each reschedule
-  cancelledBy         String?      // "STAFF" | "CUSTOMER" | "ADMIN"
-  cancelledByUserId   String?      // Actor user ID that performed cancellation
+  previousStartAt         DateTime?    // Original timestamp if rescheduled
+  staffMoveReason         String?      // Operational note explaining rescheduling
+  allowFreeCancel         Boolean      @default(false) // Penalty-free cancel if modified by staff
+  rescheduleVersion       Int          @default(0)     // Monotonic counter incremented on each reschedule
+  customerRescheduleCount Int          @default(0)     // Customer-initiated reschedules (capped at 2)
+  isOverbooking           Boolean      @default(false) // Admin/Provider walk-in override outside normal slots
+  reminder24hSentAt       DateTime?    // Timestamp when 24h reminder push was queued
+  reminder2hSentAt        DateTime?    // Timestamp when 2h reminder push was queued
+  cancelledBy             String?      // "STAFF" | "CUSTOMER"
+  cancelledByUserId       String?      // Actor user ID that performed cancellation
 
-  priceSnapshot       Float
-  customerNotes       String?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  priceSnapshot           Float
+  customerNotes           String?
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
 
   @@index([staffId, startAt, endAt])
   @@index([customerId, status, startAt])
+  @@index([startAt])
+  @@index([status, startAt])
 }
 
 model Notification {

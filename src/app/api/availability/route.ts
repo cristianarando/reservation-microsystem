@@ -7,6 +7,12 @@ import {
   parseDateAndTime,
 } from "@/lib/slot-engine";
 import {
+  diffDaysYYYYMMDD,
+  getDayBoundsInTz,
+  getDayOfWeekInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
+import {
   AvailabilityUnavailableReason,
   PublicTimeOffNotice,
   WEEKDAY_NAMES_PLURAL,
@@ -157,23 +163,29 @@ export async function GET(req: Request) {
       );
     }
 
-    const settings = await prisma.businessSettings.findFirst({ where: { id: 1 } });
-    const service = await prisma.service.findUnique({ where: { id: serviceId } });
-
-    if (!service) {
-      return NextResponse.json({ error: "Servicio no encontrado" }, { status: 404 });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return NextResponse.json(
+        { error: "Formato de fecha inválido (esperado YYYY-MM-DD)." },
+        { status: 400 }
+      );
     }
 
-    // Validate base date
-    const requestedDate = new Date(`${dateStr}T00:00:00`);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const settings = await prisma.businessSettings.findFirst({ where: { id: 1 } });
+    const businessTz = resolveBusinessTimeZone(settings?.timezone);
+    const service = await prisma.service.findUnique({ where: { id: serviceId } });
 
-    const diffDays = Math.floor(
-      (requestedDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-    );
+    if (!service || !service.isActive) {
+      return NextResponse.json(
+        { error: "Servicio no encontrado o inactivo" },
+        { status: 404 }
+      );
+    }
 
-    if (diffDays < 0 || diffDays > 90) {
+    // Validate base date against business timezone calendar
+    const todayStr = formatLocalDateYYYYMMDD(new Date(), businessTz);
+    const diffDays = diffDaysYYYYMMDD(dateStr, todayStr);
+
+    if (Number.isNaN(diffDays) || diffDays < 0 || diffDays > 90) {
       return NextResponse.json(
         {
           slots: [],
@@ -190,8 +202,8 @@ export async function GET(req: Request) {
       );
     }
 
-    // Determine Day of Week (0 = Sunday, 1 = Monday ... 6 = Saturday)
-    const dayOfWeek = requestedDate.getDay();
+    // Determine Day of Week (0 = Sunday, 1 = Monday ... 6 = Saturday) in business timezone
+    const dayOfWeek = getDayOfWeekInTz(dateStr, businessTz);
 
     // Query candidates
     let eligibleStaffIds: string[] = [];
@@ -208,12 +220,7 @@ export async function GET(req: Request) {
     if (staffId === "ANY") {
       eligibleStaffIds = assignedActiveStaffIds;
     } else {
-      if (assignedActiveStaffIds.includes(staffId)) {
-        eligibleStaffIds = [staffId];
-      } else {
-        const totalAssignedCount = await prisma.staffService.count({ where: { serviceId } });
-        eligibleStaffIds = totalAssignedCount === 0 ? [staffId] : [];
-      }
+      eligibleStaffIds = assignedActiveStaffIds.includes(staffId) ? [staffId] : [];
     }
 
     if (eligibleStaffIds.length === 0) {
@@ -251,8 +258,7 @@ export async function GET(req: Request) {
     }
 
     // Query shifts, timeOffs, appointments, and candidate staff profiles for that date range
-    const startOfDay = new Date(`${dateStr}T00:00:00`);
-    const endOfDay = new Date(`${dateStr}T23:59:59.999`);
+    const { startOfDay, endOfDay } = getDayBoundsInTz(dateStr, businessTz);
     // Also include morning of next day in case shift goes past midnight
     const nextMorning = new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000);
 
@@ -351,6 +357,7 @@ export async function GET(req: Request) {
         slotStepMin: slotStep,
         leadTimeMin: staffLeadTime,
         now: new Date(),
+        timeZone: businessTz,
       });
 
       for (const time of availableForStaff) {

@@ -7,7 +7,10 @@ export interface AppointmentCheckable {
   status: string;
   allowFreeCancel: boolean;
   staffMoveReason?: string | null;
+  customerRescheduleCount?: number;
 }
+
+export const MAX_CUSTOMER_RESCHEDULES = 2;
 
 const ACTIVE_BOOKING_STATUSES = new Set(["CONFIRMED", "RESCHEDULED_BY_STAFF"]);
 
@@ -48,6 +51,9 @@ export function canCustomerCancelAppointment(
   if (appointment.status === "COMPLETED") {
     return { allowed: false, reason: "La cita ya fue completada." };
   }
+  if (appointment.status === "NO_SHOW" || appointment.status === "NO_SHOW_ARCHIVED") {
+    return { allowed: false, reason: "Esta cita figura como inasistencia y no puede cancelarse." };
+  }
 
   const nowMs = now.getTime();
   const endMs = new Date(appointment.endAt || appointment.startAt).getTime();
@@ -76,6 +82,56 @@ export function canCustomerCancelAppointment(
   return { allowed: true };
 }
 
+export function canCustomerRescheduleAppointment(
+  appointment: AppointmentCheckable,
+  minCancelNoticeHours: number,
+  maxReschedules = MAX_CUSTOMER_RESCHEDULES,
+  now = new Date()
+): { allowed: boolean; reason?: string; remainingReschedules: number } {
+  const used = appointment.customerRescheduleCount ?? 0;
+  const remainingReschedules = Math.max(0, maxReschedules - used);
+
+  if (!isActiveBookingStatus(appointment.status)) {
+    return {
+      allowed: false,
+      reason: "Solo se pueden reprogramar citas activas.",
+      remainingReschedules,
+    };
+  }
+
+  const nowMs = now.getTime();
+  const endMs = new Date(appointment.endAt || appointment.startAt).getTime();
+  if (!Number.isNaN(endMs) && endMs <= nowMs) {
+    return {
+      allowed: false,
+      reason: "Esta cita ya finalizó y no puede reprogramarse.",
+      remainingReschedules,
+    };
+  }
+
+  if (remainingReschedules <= 0) {
+    return {
+      allowed: false,
+      reason: `Alcanzaste el límite de ${maxReschedules} reprogramaciones en línea para esta cita. Escríbenos por WhatsApp si necesitas un cambio adicional.`,
+      remainingReschedules: 0,
+    };
+  }
+
+  if (!appointment.allowFreeCancel && appointment.status !== "RESCHEDULED_BY_STAFF") {
+    const startMs = new Date(appointment.startAt).getTime();
+    const hoursRemaining = (startMs - nowMs) / (1000 * 60 * 60);
+    if (hoursRemaining < minCancelNoticeHours) {
+      return {
+        allowed: false,
+        reason: `No es posible reprogramar con menos de ${minCancelNoticeHours} horas de anticipación. Comunícate por WhatsApp si tienes una urgencia.`,
+        remainingReschedules,
+      };
+    }
+  }
+
+  return { allowed: true, remainingReschedules };
+}
+
 export function findConflictingAppointments(
   appointments: AppointmentCheckable[],
   blockStart: Date,
@@ -85,10 +141,9 @@ export function findConflictingAppointments(
   const bEnd = blockEnd.getTime();
 
   return appointments.filter((apt) => {
-    if (apt.status === "CANCELLED" || apt.status === "COMPLETED") return false;
+    if (!isActiveBookingStatus(apt.status)) return false;
     const aStart = new Date(apt.startAt).getTime();
     const aEnd = new Date(apt.endAt).getTime();
-    // Overlap condition
     return aStart < bEnd && aEnd > bStart;
   });
 }

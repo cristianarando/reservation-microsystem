@@ -402,11 +402,13 @@ export function getDayScheduleStatus(params: {
     let hasFullDayOff = false;
     let hasPartialBlock = false;
 
-    const overlappingBlocks = (t.timeOffs || []).filter((to) => {
-      const s = new Date(to.startAt);
-      const e = new Date(to.endAt);
-      return !isNaN(s.getTime()) && !isNaN(e.getTime()) && s <= dayEnd && e >= dayStart;
-    });
+    const overlappingBlocks = (t.timeOffs || [])
+      .filter((to) => {
+        const s = new Date(to.startAt);
+        const e = new Date(to.endAt);
+        return !isNaN(s.getTime()) && !isNaN(e.getTime()) && s <= dayEnd && e >= dayStart;
+      })
+      .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
 
     for (const to of overlappingBlocks) {
       const s = new Date(to.startAt);
@@ -444,6 +446,9 @@ export function getDayScheduleStatus(params: {
           effectiveEndMin = Math.max(baseStartMin, blockStartMin);
           hasPartialBlock = true;
         }
+      } else if (blockStartMin < effectiveEndMin && blockEndMin > effectiveStartMin) {
+        // Mid-day CUSTOM_BLOCK inside active shift bounds
+        hasPartialBlock = true;
       }
     }
 

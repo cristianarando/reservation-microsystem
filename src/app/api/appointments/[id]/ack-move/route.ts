@@ -4,6 +4,7 @@ import type { Appointment } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { parseJsonObject, safeErrorResponse, sanitizeAppointmentForClient, verifySameOrigin } from "@/lib/api-guard";
+import { emitRealtimeEvent } from "@/lib/realtime-events";
 
 export const dynamic = "force-dynamic";
 
@@ -160,6 +161,17 @@ export async function POST(
     }
     if ("forbidden" in result && result.forbidden) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+    }
+
+    if (!result.idempotent) {
+      emitRealtimeEvent({
+        type: "APPOINTMENT_UPDATED",
+        appointmentId: result.appointment.id,
+        staffId: result.appointment.staffId,
+        customerId: result.appointment.customerId,
+        actorUserId: user.id,
+        status: result.appointment.status,
+      });
     }
 
     return NextResponse.json({

@@ -184,7 +184,7 @@ const globalForRealtime = globalThis as unknown as {
 function getEmitter(): EventEmitter {
   if (!globalForRealtime.realtimeEmitter) {
     const emitter = new EventEmitter();
-    emitter.setMaxListeners(200);
+    emitter.setMaxListeners(100);
     globalForRealtime.realtimeEmitter = emitter;
   }
   return globalForRealtime.realtimeEmitter;

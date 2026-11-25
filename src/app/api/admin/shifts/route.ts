@@ -13,6 +13,7 @@ import {
   verifyProviderOwnsStaff,
   verifySameOrigin,
 } from "@/lib/api-guard";
+import { emitRealtimeEvent } from "@/lib/realtime-events";
 
 export const dynamic = "force-dynamic";
 
@@ -148,12 +149,26 @@ export async function PUT(req: Request) {
       });
     });
 
+    emitRealtimeEvent({
+      type: "SCHEDULE_UPDATED",
+      staffId,
+      actorUserId: user.id,
+    });
+
     return NextResponse.json({
       ok: true,
       staff: updated,
       effectiveIsActive: updated?.isActive,
     });
   } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2025"
+    ) {
+      return NextResponse.json({ error: "Profesional no encontrado." }, { status: 404 });
+    }
     return safeErrorResponse(
       error,
       "No se pudieron guardar los horarios de atención."

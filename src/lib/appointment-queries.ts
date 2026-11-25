@@ -1,6 +1,10 @@
 // src/lib/appointment-queries.ts
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { canCustomerCancelAppointment } from "@/lib/booking-rules";
+import {
+  canCustomerCancelAppointment,
+  canCustomerRescheduleAppointment,
+} from "@/lib/booking-rules";
 
 export const HISTORY_PAGE_SIZE = 6;
 export const MAX_HISTORY_PAGE_SIZE = 25;
@@ -53,16 +57,38 @@ export async function getCustomerHistoryPage({
   const safeLimit = Math.min(Math.max(limit || HISTORY_PAGE_SIZE, 1), MAX_HISTORY_PAGE_SIZE);
   const where = buildCustomerHistoryWhere(customerId, now);
 
-  const [rows, totalCount] = await Promise.all([
-    prisma.appointment.findMany({
-      where,
-      include: SAFE_HISTORY_INCLUDE,
-      orderBy: [{ startAt: "desc" }, { id: "desc" }],
-      take: safeLimit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    }),
-    prisma.appointment.count({ where }),
-  ]);
+  let rows;
+  let totalCount = 0;
+  try {
+    [rows, totalCount] = await Promise.all([
+      prisma.appointment.findMany({
+        where,
+        include: SAFE_HISTORY_INCLUDE,
+        orderBy: [{ startAt: "desc" }, { id: "desc" }],
+        take: safeLimit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      }),
+      prisma.appointment.count({ where }),
+    ]);
+  } catch (err) {
+    if (
+      cursor &&
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2025"
+    ) {
+      [rows, totalCount] = await Promise.all([
+        prisma.appointment.findMany({
+          where,
+          include: SAFE_HISTORY_INCLUDE,
+          orderBy: [{ startAt: "desc" }, { id: "desc" }],
+          take: safeLimit + 1,
+        }),
+        prisma.appointment.count({ where }),
+      ]);
+    } else {
+      throw err;
+    }
+  }
 
   const hasMore = rows.length > safeLimit;
   const pageItems = hasMore ? rows.slice(0, safeLimit) : rows;
@@ -116,11 +142,15 @@ export async function getCustomerBootstrapAppointments(
 
   const activeAnnotated = activeRows.map((apt) => {
     const cancelCheck = canCustomerCancelAppointment(apt, minCancelNoticeHours, now);
+    const rescheduleCheck = canCustomerRescheduleAppointment(apt, minCancelNoticeHours, undefined, now);
     return {
       ...apt,
       canCancel: cancelCheck.allowed,
       cancelReason: cancelCheck.reason,
       isFreeCancellationBecauseOfStaff: cancelCheck.isFreeCancellationBecauseOfStaff,
+      canReschedule: rescheduleCheck.allowed,
+      rescheduleReason: rescheduleCheck.reason,
+      remainingReschedules: rescheduleCheck.remainingReschedules,
     };
   });
 

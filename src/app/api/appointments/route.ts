@@ -1,8 +1,20 @@
 // src/app/api/appointments/route.ts
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { prisma, withImmediateLock } from "@/lib/prisma";
 import { clearImpersonator, getCurrentUser, setSessionUserId } from "@/lib/session";
-import { parseDateAndTime, computeAvailableSlotsForStaff } from "@/lib/slot-engine";
+import {
+  computeAvailableSlotsForStaff,
+  formatLocalDateYYYYMMDD,
+  parseDateAndTime,
+} from "@/lib/slot-engine";
+import {
+  diffDaysYYYYMMDD,
+  formatSpanishDateInTz,
+  getDayBoundsInTz,
+  getDayOfWeekInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import {
   parseJsonObject,
   safeErrorResponse,
@@ -32,6 +44,8 @@ export const dynamic = "force-dynamic";
 
 const BOOK_AUTH_WINDOW_MS = 15 * 60 * 1000;
 const MAX_BOOK_AUTH_FAILS = 5;
+const DUMMY_HASH = bcrypt.hashSync("booking-timing-equalizer", 10);
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 class BookingConflictError extends Error {
   status: number;
@@ -58,15 +72,20 @@ export async function POST(req: Request) {
       customerPassword,
       customerPhone,
       customerNotes,
-    } = parsedBody.data as Record<string, string | undefined>;
+    } = parsedBody.data as Record<string, unknown>;
 
     let user = await getCurrentUser();
 
-    // If not authenticated, require credentials to prevent account impersonation
+    // If not authenticated, require valid credentials or register a new customer atomically
     if (!user) {
-      if (!customerEmail || !customerName) {
+      if (
+        typeof customerEmail !== "string" ||
+        !EMAIL_REGEX.test(customerEmail.trim()) ||
+        typeof customerName !== "string" ||
+        customerName.trim().length < 2
+      ) {
         return NextResponse.json(
-          { error: "Por favor proporciona tu nombre y correo electrónico para confirmar la cita." },
+          { error: "Por favor proporciona tu nombre y un correo electrónico válido para confirmar la cita." },
           { status: 400 }
         );
       }
@@ -74,12 +93,15 @@ export async function POST(req: Request) {
       const cleanEmail = normalizeEmail(customerEmail);
       const ip = getClientIp(req);
       const authRateKey = `book-auth-fail:${ip}:${cleanEmail}`;
+      const globalEmailKey = `book-auth-fail-email:${cleanEmail}`;
 
       const rateCheck = peekRateLimit(authRateKey, MAX_BOOK_AUTH_FAILS);
-      if (!rateCheck.allowed) {
-        return NextResponse.json(tooManyRequestsBody(rateCheck.retryAfterSec), {
+      const globalRateCheck = peekRateLimit(globalEmailKey, MAX_BOOK_AUTH_FAILS * 2);
+      if (!rateCheck.allowed || !globalRateCheck.allowed) {
+        const retry = Math.max(rateCheck.retryAfterSec, globalRateCheck.retryAfterSec);
+        return NextResponse.json(tooManyRequestsBody(retry), {
           status: 429,
-          headers: { "Retry-After": String(rateCheck.retryAfterSec) },
+          headers: { "Retry-After": String(retry) },
         });
       }
 
@@ -88,9 +110,24 @@ export async function POST(req: Request) {
       });
 
       if (existingUser) {
-        // Google-only accounts have passwordHash === null and must authenticate via Google OAuth
-        if (!existingUser.passwordHash) {
+        if (typeof customerPassword !== "string" || !customerPassword) {
+          await bcrypt.compare("placeholder", DUMMY_HASH);
+          return NextResponse.json(
+            {
+              error: "Ingresa tu contraseña o inicia sesión para confirmar con esta cuenta.",
+              requiresPassword: true,
+            },
+            { status: 401 }
+          );
+        }
+
+        const isMatch = await bcrypt.compare(
+          customerPassword,
+          existingUser.passwordHash || DUMMY_HASH
+        );
+        if (!existingUser.passwordHash || !isMatch) {
           const failState = consumeRateLimit(authRateKey, MAX_BOOK_AUTH_FAILS, BOOK_AUTH_WINDOW_MS);
+          consumeRateLimit(globalEmailKey, MAX_BOOK_AUTH_FAILS * 2, BOOK_AUTH_WINDOW_MS);
           if (!failState.allowed) {
             return NextResponse.json(tooManyRequestsBody(failState.retryAfterSec), {
               status: 429,
@@ -100,47 +137,16 @@ export async function POST(req: Request) {
           return NextResponse.json(
             {
               error:
-                "Esta cuenta está vinculada con Google. Por favor inicia sesión con Google para continuar.",
-            },
-            { status: 401 }
-          );
-        }
-
-        // Existing password-based account: MUST verify password to prevent unauthorized impersonation
-        if (!customerPassword || typeof customerPassword !== "string") {
-          return NextResponse.json(
-            {
-              error:
-                "Ya existe una cuenta con este correo. Ingresa tu contraseña para confirmar la cita.",
-              requiresPassword: true,
-            },
-            { status: 401 }
-          );
-        }
-
-        const isMatch = await bcrypt.compare(customerPassword, existingUser.passwordHash);
-        if (!isMatch) {
-          const failState = consumeRateLimit(authRateKey, MAX_BOOK_AUTH_FAILS, BOOK_AUTH_WINDOW_MS);
-          if (!failState.allowed) {
-            return NextResponse.json(tooManyRequestsBody(failState.retryAfterSec), {
-              status: 429,
-              headers: { "Retry-After": String(failState.retryAfterSec) },
-            });
-          }
-          return NextResponse.json(
-            {
-              error: "Contraseña incorrecta. Por favor ingresa la contraseña de tu cuenta.",
-              requiresPassword: true,
+                "No pudimos verificar tus credenciales. Si registraste esta cuenta con Google, usa el botón de Google.",
             },
             { status: 401 }
           );
         }
         resetRateLimit(authRateKey);
+        resetRateLimit(globalEmailKey);
         user = existingUser;
       } else {
-        // New customer: create account with password
         if (
-          !customerPassword ||
           typeof customerPassword !== "string" ||
           customerPassword.length < 6 ||
           customerPassword.length > 128
@@ -154,25 +160,42 @@ export async function POST(req: Request) {
           );
         }
 
+        const cleanPhoneOnReg =
+          typeof customerPhone === "string" && customerPhone.trim().length > 0
+            ? customerPhone.trim().slice(0, 40)
+            : null;
         const passwordHash = await bcrypt.hash(customerPassword, 10);
-        user = await prisma.user.create({
-          data: {
-            email: cleanEmail,
-            name: String(customerName).trim().slice(0, 120),
-            passwordHash,
-            phone: customerPhone ? String(customerPhone).trim().slice(0, 40) : null,
-            role: "CUSTOMER",
-          },
-        });
+        try {
+          user = await prisma.user.create({
+            data: {
+              email: cleanEmail,
+              name: customerName.trim().slice(0, 120),
+              passwordHash,
+              phone: cleanPhoneOnReg,
+              role: "CUSTOMER",
+            },
+          });
+        } catch (createErr) {
+          if (
+            createErr instanceof Prisma.PrismaClientKnownRequestError &&
+            createErr.code === "P2002"
+          ) {
+            return NextResponse.json(
+              {
+                error: "Ya existe una cuenta con este correo. Inicia sesión para continuar.",
+                requiresPassword: true,
+              },
+              { status: 409 }
+            );
+          }
+          throw createErr;
+        }
       }
 
-      // Establish secure session
       await clearImpersonator();
       await setSessionUserId(user.id, user.sessionVersion);
     }
 
-    // Acceptance Criterion: A professional provider account (PROVIDER) is not a customer.
-    // Doctors manage appointments in /admin and cannot self-book in the public customer flow.
     if (user.role === "PROVIDER") {
       return NextResponse.json(
         {
@@ -193,20 +216,27 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!serviceId || !date || !time) {
+    if (
+      typeof serviceId !== "string" ||
+      !serviceId ||
+      typeof date !== "string" ||
+      typeof time !== "string"
+    ) {
       return NextResponse.json(
         { error: "Faltan datos obligatorios (servicio, fecha u hora)." },
         { status: 400 }
       );
     }
 
-    // Save/update phone if provided or missing
-    if (customerPhone && customerPhone.trim().length > 4) {
+    const cleanPhoneInput =
+      typeof customerPhone === "string" ? customerPhone.trim().slice(0, 40) : "";
+
+    if (cleanPhoneInput.length > 4) {
       await prisma.user.update({
         where: { id: user.id },
-        data: { phone: customerPhone.trim() },
+        data: { phone: cleanPhoneInput },
       });
-      user.phone = customerPhone.trim();
+      user.phone = cleanPhoneInput;
     } else if (!user.phone) {
       return NextResponse.json(
         { error: "Por favor proporciona un número de teléfono de contacto." },
@@ -214,34 +244,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const settings = await prisma.businessSettings.findFirst({ where: { id: 1 } });
-    const maxActive = settings?.maxActiveBookings ?? 2;
-
-    // Check customer active bookings limit (present/ongoing to future only)
-    const now = new Date();
-    const activeBookingsCount = await prisma.appointment.count({
-      where: {
-        customerId: user.id,
-        endAt: { gt: now },
-        status: { in: ["CONFIRMED", "RESCHEDULED_BY_STAFF"] },
-      },
-    });
-
-    if (activeBookingsCount >= maxActive) {
-      return NextResponse.json(
-        {
-          error: `Ya tienes ${activeBookingsCount} citas futuras activas (el máximo permitido es ${maxActive}). Asiste a tu cita o modifícala antes de reservar una nueva.`,
-        },
-        { status: 429 }
-      );
-    }
-
-    const service = await prisma.service.findUnique({ where: { id: serviceId } });
-    if (!service || !service.isActive) {
-      return NextResponse.json({ error: "Servicio no encontrado o inactivo." }, { status: 404 });
-    }
-
-    // Validate date and time format
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
       return NextResponse.json(
         { error: "Formato de fecha (YYYY-MM-DD) u hora (HH:mm) inválido." },
@@ -249,174 +251,23 @@ export async function POST(req: Request) {
       );
     }
 
-    const startAt = parseDateAndTime(date, time);
-    if (isNaN(startAt.getTime())) {
-      return NextResponse.json({ error: "Fecha u hora inválida." }, { status: 400 });
-    }
-
-    const totalDurationMin = service.durationMin + service.bufferAfterMin;
-    const endAt = new Date(startAt.getTime() + totalDurationMin * 60_000);
-    const slotStep = settings?.slotStepMin ?? 30;
-
-    const requestedDate = new Date(`${date}T00:00:00`);
-    const todayMidnight = new Date();
-    todayMidnight.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor(
-      (requestedDate.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24)
-    );
-
-    if (diffDays < 0) {
-      return NextResponse.json(
-        { error: "No es posible agendar citas en fechas pasadas." },
-        { status: 400 }
-      );
-    }
-
-    const dayOfWeek = requestedDate.getDay();
-    const startOfDay = new Date(`${date}T00:00:00`);
-    const endOfDay = new Date(`${date}T23:59:59.999`);
-    const nextMorning = new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000);
-
-    // Check if specific staff has FULL_DAY_OFF or VACATION on this date
-    if (staffId && staffId !== "ANY") {
-      const fullDayOff = await prisma.timeOff.findFirst({
-        where: {
-          staffId,
-          type: { in: ["FULL_DAY_OFF", "VACATION"] },
-          startAt: { lte: endOfDay },
-          endAt: { gte: startOfDay },
-        },
-      });
-      if (fullDayOff) {
-        return NextResponse.json(
-          {
-            error: `El profesional no se encuentra atendiendo en esta fecha (${
-              fullDayOff.publicNote || "Periodo de vacaciones o día cerrado"
-            }).`,
-          },
-          { status: 409 }
-        );
-      }
-    }
-
-    // Helper to verify if a candidate staff member is genuinely available at `date` & `time`
-    const isStaffAvailableForSlot = async (candidateStaffId: string) => {
-      const staffProfile = await prisma.staffProfile.findUnique({
-        where: { id: candidateStaffId },
-      });
-      if (!staffProfile || !staffProfile.isActive) {
-        return { ok: false, reason: "El profesional seleccionado no se encuentra activo." };
-      }
-
-      const staffHorizon = staffProfile.customHorizonDays ?? settings?.bookingHorizonDays ?? 7;
-      if (diffDays > staffHorizon) {
-        return {
-          ok: false,
-          reason: `La agenda del profesional solo está abierta para los próximos ${staffHorizon} días.`,
-        };
-      }
-
-      const staffLeadTime = staffProfile.customLeadTimeMin ?? settings?.minLeadTimeMinutes ?? 30;
-      const staffShifts = await prisma.workingShift.findMany({
-        where: { staffId: candidateStaffId, dayOfWeek },
-      });
-      const staffTimeOffs = await prisma.timeOff.findMany({
-        where: {
-          staffId: candidateStaffId,
-          startAt: { lte: nextMorning },
-          endAt: { gte: startOfDay },
-        },
-      });
-      const staffAppointments = await prisma.appointment.findMany({
-        where: {
-          staffId: candidateStaffId,
-          startAt: { lte: nextMorning },
-          endAt: { gte: startOfDay },
-          status: { in: ["CONFIRMED", "RESCHEDULED_BY_STAFF"] },
-        },
-      });
-
-      const validSlots = computeAvailableSlotsForStaff({
-        dateStr: date,
-        shifts: staffShifts,
-        timeOffs: staffTimeOffs,
-        appointments: staffAppointments,
-        serviceDuration: totalDurationMin,
-        slotStepMin: slotStep,
-        leadTimeMin: staffLeadTime,
-        now,
-      });
-
-      if (!validSlots.includes(time)) {
-        return {
-          ok: false,
-          reason: "El horario seleccionado no está disponible o ya pasó el margen de reserva.",
-        };
-      }
-
-      return { ok: true };
-    };
-
-    // Determine target staff
-    let targetStaffId = staffId;
-    if (!targetStaffId || targetStaffId === "ANY") {
-      // Find eligible staff that do this service
-      const eligible = await prisma.staffService.findMany({
-        where: { serviceId },
-        include: { staff: true },
-      });
-
-      let chosenStaffId: string | null = null;
-      for (const item of eligible) {
-        if (!item.staff.isActive) continue;
-        const check = await isStaffAvailableForSlot(item.staffId);
-        if (check.ok) {
-          chosenStaffId = item.staffId;
-          break;
-        }
-      }
-
-      if (!chosenStaffId) {
-        return NextResponse.json(
-          { error: "No hay profesionales disponibles en este horario exacto." },
-          { status: 409 }
-        );
-      }
-      targetStaffId = chosenStaffId;
-    } else {
-      // Verify that specific staffId is assigned to this service
-      const isAssigned = await prisma.staffService.findUnique({
-        where: {
-          staffId_serviceId: {
-            staffId: targetStaffId,
-            serviceId,
-          },
-        },
-      });
-      if (!isAssigned) {
-        return NextResponse.json(
-          { error: "El profesional seleccionado no ofrece este servicio." },
-          { status: 400 }
-        );
-      }
-
-      const check = await isStaffAvailableForSlot(targetStaffId);
-      if (!check.ok) {
-        return NextResponse.json(
-          { error: check.reason },
-          { status: 409 }
-        );
-      }
-    }
-
+    const requestedStaffId =
+      typeof staffId === "string" && staffId.trim() ? staffId.trim() : "ANY";
     const customerId = user.id;
 
-    // Atomic transaction to prevent double-booking race conditions (TOCTOU) and persist notifications/push deliveries
-    const newAppointment = await prisma.$transaction(async (tx) => {
+    // Serialize SQLite write lock from the very start of the transaction (eliminates TOCTOU double-booking)
+    const newAppointment = await withImmediateLock(async (tx) => {
+      const now = new Date();
+      const settings = await tx.businessSettings.findFirst({ where: { id: 1 } });
+      const businessTz = resolveBusinessTimeZone(settings?.timezone);
+      const hidePushDetails = Boolean(settings?.pushHideDetails);
+      const maxActive = settings?.maxActiveBookings ?? 2;
+      const slotStep = settings?.slotStepMin ?? 30;
+
       const txActiveCount = await tx.appointment.count({
         where: {
           customerId,
-          endAt: { gt: new Date() },
+          endAt: { gt: now },
           status: { in: ["CONFIRMED", "RESCHEDULED_BY_STAFF"] },
         },
       });
@@ -427,33 +278,150 @@ export async function POST(req: Request) {
         );
       }
 
-      const conflict = await tx.appointment.findFirst({
+      const service = await tx.service.findUnique({ where: { id: serviceId } });
+      if (!service || !service.isActive) {
+        throw new BookingConflictError("Servicio no encontrado o inactivo.", 404);
+      }
+
+      const startAt = parseDateAndTime(date, time, businessTz);
+      if (isNaN(startAt.getTime())) {
+        throw new BookingConflictError("Fecha u hora inválida.", 400);
+      }
+
+      const totalDurationMin = service.durationMin + service.bufferAfterMin;
+      const endAt = new Date(startAt.getTime() + totalDurationMin * 60_000);
+
+      const todayStr = formatLocalDateYYYYMMDD(now, businessTz);
+      const diffDays = diffDaysYYYYMMDD(date, todayStr);
+      if (Number.isNaN(diffDays) || diffDays < 0) {
+        throw new BookingConflictError("No es posible agendar citas en fechas pasadas.", 400);
+      }
+
+      // Prevent customer self-overlap (same customer booking two concurrent appointments)
+      const selfOverlap = await tx.appointment.findFirst({
         where: {
-          staffId: targetStaffId,
+          customerId,
           status: { in: ["CONFIRMED", "RESCHEDULED_BY_STAFF"] },
           startAt: { lt: endAt },
           endAt: { gt: startAt },
         },
       });
-      if (conflict) {
+      if (selfOverlap) {
         throw new BookingConflictError(
-          "¡Ups! Este horario acaba de ser ocupado. Por favor elige otro.",
+          "Ya tienes otra cita reservada en ese mismo horario. Elige un horario distinto.",
           409
         );
       }
 
-      const timeOff = await tx.timeOff.findFirst({
-        where: {
-          staffId: targetStaffId,
-          startAt: { lt: endAt },
-          endAt: { gt: startAt },
-        },
-      });
-      if (timeOff) {
-        throw new BookingConflictError(
-          "El profesional no se encuentra disponible en esa franja horaria.",
-          409
-        );
+      const dayOfWeek = getDayOfWeekInTz(date, businessTz);
+      const { startOfDay, endOfDay } = getDayBoundsInTz(date, businessTz);
+      const nextMorning = new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000);
+
+      const verifyCandidateStaffInTx = async (
+        candidateStaffId: string
+      ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+        const staffProfile = await tx.staffProfile.findUnique({
+          where: { id: candidateStaffId },
+        });
+        if (!staffProfile || !staffProfile.isActive) {
+          return { ok: false, reason: "El profesional seleccionado no se encuentra activo." };
+        }
+
+        const staffHorizon = staffProfile.customHorizonDays ?? settings?.bookingHorizonDays ?? 7;
+        if (diffDays > staffHorizon) {
+          return {
+            ok: false,
+            reason: `La agenda del profesional solo está abierta para los próximos ${staffHorizon} días.`,
+          };
+        }
+
+        const staffLeadTime =
+          staffProfile.customLeadTimeMin ?? settings?.minLeadTimeMinutes ?? 30;
+        const [staffShifts, staffTimeOffs, staffAppointments] = await Promise.all([
+          tx.workingShift.findMany({
+            where: { staffId: candidateStaffId, dayOfWeek },
+          }),
+          tx.timeOff.findMany({
+            where: {
+              staffId: candidateStaffId,
+              startAt: { lte: nextMorning },
+              endAt: { gte: new Date(startOfDay.getTime() - 12 * 3600_000) },
+            },
+          }),
+          tx.appointment.findMany({
+            where: {
+              staffId: candidateStaffId,
+              startAt: { lte: nextMorning },
+              endAt: { gte: startOfDay },
+              status: { in: ["CONFIRMED", "RESCHEDULED_BY_STAFF"] },
+            },
+          }),
+        ]);
+
+        const validSlots = computeAvailableSlotsForStaff({
+          dateStr: date,
+          shifts: staffShifts,
+          timeOffs: staffTimeOffs,
+          appointments: staffAppointments,
+          serviceDuration: totalDurationMin,
+          slotStepMin: slotStep,
+          leadTimeMin: staffLeadTime,
+          now,
+          timeZone: businessTz,
+        });
+
+        if (!validSlots.includes(time)) {
+          return {
+            ok: false,
+            reason: "El horario seleccionado no está disponible o ya pasó el margen de reserva.",
+          };
+        }
+
+        return { ok: true };
+      };
+
+      let targetStaffId: string | null = null;
+
+      if (requestedStaffId === "ANY") {
+        const eligible = await tx.staffService.findMany({
+          where: { serviceId, staff: { isActive: true } },
+          include: { staff: true },
+          orderBy: { staff: { sortOrder: "asc" } },
+        });
+        for (const item of eligible) {
+          const check = await verifyCandidateStaffInTx(item.staffId);
+          if (check.ok) {
+            targetStaffId = item.staffId;
+            break;
+          }
+        }
+        if (!targetStaffId) {
+          throw new BookingConflictError(
+            "No hay profesionales disponibles en este horario exacto.",
+            409
+          );
+        }
+      } else {
+        const isAssigned = await tx.staffService.findUnique({
+          where: {
+            staffId_serviceId: {
+              staffId: requestedStaffId,
+              serviceId,
+            },
+          },
+        });
+        if (!isAssigned) {
+          throw new BookingConflictError(
+            "El profesional seleccionado no ofrece este servicio.",
+            400
+          );
+        }
+
+        const check = await verifyCandidateStaffInTx(requestedStaffId);
+        if (!check.ok) {
+          throw new BookingConflictError(check.reason, 409);
+        }
+        targetStaffId = requestedStaffId;
       }
 
       const created = await tx.appointment.create({
@@ -465,9 +433,10 @@ export async function POST(req: Request) {
           endAt,
           status: "CONFIRMED",
           priceSnapshot: service.price,
-          customerNotes: customerNotes
-            ? String(customerNotes).trim().slice(0, 500)
-            : null,
+          customerNotes:
+            typeof customerNotes === "string" && customerNotes.trim()
+              ? customerNotes.trim().slice(0, 500)
+              : null,
         },
         include: {
           service: true,
@@ -479,11 +448,7 @@ export async function POST(req: Request) {
       const customerLabel = created.customer?.name || "Un cliente";
       const serviceLabel = created.service?.name || "Servicio";
       const staffLabel = created.staff?.displayName || "Profesional";
-      const dateFormatted = startAt.toLocaleDateString("es-ES", {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-      });
+      const dateFormatted = formatSpanishDateInTz(startAt, businessTz);
       const noteSnippet = created.customerNotes
         ? ` • Nota: "${created.customerNotes.slice(0, 60)}"`
         : "";
@@ -512,8 +477,12 @@ export async function POST(req: Request) {
           appointmentId: created.id,
           recipientUserIds: staffRecipients,
           actorUserId: customerId,
-          title: `📅 Nueva cita: ${serviceLabel} (${time})`,
-          body: `${customerLabel} agendó ${serviceLabel} con ${staffLabel} para el ${dateFormatted} a las ${time}.${noteSnippet}`,
+          title: hidePushDetails
+            ? "Nueva cita registrada"
+            : `📅 Nueva cita: ${serviceLabel} (${time})`,
+          body: hidePushDetails
+            ? "Tienes una nueva reserva en tu agenda. Toca para ver los detalles."
+            : `${customerLabel} agendó ${serviceLabel} con ${staffLabel} para el ${dateFormatted} a las ${time}.${noteSnippet}`,
           targetPath: `/admin?tab=agenda&date=${encodeURIComponent(date)}&appointmentId=${encodeURIComponent(created.id)}`,
           tag: `apt-new-${created.id}`,
         });

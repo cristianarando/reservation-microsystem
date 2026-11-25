@@ -1,6 +1,11 @@
 // src/lib/appointment-lifecycle.ts
 import { Prisma } from "@prisma/client";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
+import {
+  DEFAULT_BUSINESS_TIMEZONE,
+  formatSpanishDateInTz,
+  formatSpanishTimeInTz,
+} from "@/lib/timezone";
 import { RealtimeEventPayload } from "@/lib/realtime-events";
 import { enqueuePushDeliveriesInTx } from "@/lib/web-push";
 
@@ -257,22 +262,26 @@ export async function cancelAppointmentInTx(
     include: { customer: true, service: true, staff: true },
   });
 
-  const aptDate = new Date(current.startAt);
-  const timeFormatted = aptDate.toLocaleTimeString("es-ES", {
-    hour: "2-digit",
-    minute: "2-digit",
+  const settings = await tx.businessSettings.findFirst({
+    where: { id: 1 },
+    select: { timezone: true, pushHideDetails: true },
   });
-  const dateFormatted = aptDate.toLocaleDateString("es-ES", {
+  const businessTz = settings?.timezone || DEFAULT_BUSINESS_TIMEZONE;
+  const hidePushDetails = Boolean(settings?.pushHideDetails);
+
+  const aptDate = new Date(current.startAt);
+  const timeFormatted = formatSpanishTimeInTz(aptDate, businessTz);
+  const dateFormatted = formatSpanishDateInTz(aptDate, businessTz, {
     weekday: "long",
     day: "numeric",
     month: "short",
   });
-  const dateShort = aptDate.toLocaleDateString("es-ES", {
+  const dateShort = formatSpanishDateInTz(aptDate, businessTz, {
     weekday: "short",
     day: "numeric",
     month: "short",
   });
-  const dateYmd = formatLocalDateYYYYMMDD(aptDate);
+  const dateYmd = formatLocalDateYYYYMMDD(aptDate, businessTz);
   const serviceName = current.service?.name || "Servicio";
   const staffName = current.staff?.displayName || "el profesional";
   const customerName = current.customer?.name || "Un cliente";
@@ -302,10 +311,14 @@ export async function cancelAppointmentInTx(
           notificationId: notif.id,
           recipientUserIds: [current.customerId],
           actorUserId: params.actorUser.id,
-          title: `⚠️ Cita cancelada: ${serviceName} (${dateShort} ${timeFormatted})`,
-          body: `${staffName} canceló tu cita de ${serviceName} del ${dateFormatted} a las ${timeFormatted}. Motivo: "${
-            cleanReason || "Imprevisto de agenda"
-          }". Toca para elegir otro horario.`,
+          title: hidePushDetails
+            ? "Actualización de tu cita"
+            : `⚠️ Cita cancelada: ${serviceName} (${dateShort} ${timeFormatted})`,
+          body: hidePushDetails
+            ? "Tu cita tuvo un cambio de estado. Toca para ver los detalles."
+            : `${staffName} canceló tu cita de ${serviceName} del ${dateFormatted} a las ${timeFormatted}. Motivo: "${
+                cleanReason || "Imprevisto de agenda"
+              }". Toca para elegir otro horario.`,
           targetPath: `/?tab=my-appointments&appointmentId=${encodeURIComponent(current.id)}`,
           tag: `apt-cancel-${current.id}`,
         });
@@ -348,8 +361,12 @@ export async function cancelAppointmentInTx(
         appointmentId: current.id,
         recipientUserIds: staffRecipients,
         actorUserId: params.actorUser.id,
-        title: `🔓 Cita cancelada: ${serviceName} (${timeFormatted})`,
-        body: `${customerName} canceló su cita de ${serviceName} con ${staffName} del ${dateFormatted} a las ${timeFormatted}. El horario quedó libre.`,
+        title: hidePushDetails
+          ? "Actualización en tu agenda"
+          : `🔓 Cita cancelada: ${serviceName} (${timeFormatted})`,
+        body: hidePushDetails
+          ? "Se liberó un turno en tu agenda. Toca para revisar."
+          : `${customerName} canceló su cita de ${serviceName} con ${staffName} del ${dateFormatted} a las ${timeFormatted}. El horario quedó libre.`,
         targetPath: `/admin?tab=agenda&date=${encodeURIComponent(dateYmd)}&appointmentId=${encodeURIComponent(current.id)}`,
         tag: `apt-cust-cancel-${current.id}`,
       });

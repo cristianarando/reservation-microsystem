@@ -1,8 +1,15 @@
 // src/app/api/admin/day-override/route.ts
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, withImmediateLock } from "@/lib/prisma";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
 import { formatTimeHHmm, parseDateAndTime } from "@/lib/slot-engine";
+import {
+  formatSpanishDateInTz,
+  formatSpanishTimeInTz,
+  getDayBoundsInTz,
+  getDayOfWeekInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import {
   validateScheduleOverride,
   validateVacationRange,
@@ -12,6 +19,7 @@ import {
   parseJsonObject,
   requireStaffOrAdmin,
   safeErrorResponse,
+  sanitizeAppointmentForClient,
   verifyProviderOwnsStaff,
   verifySameOrigin,
 } from "@/lib/api-guard";
@@ -27,6 +35,13 @@ import {
 export const dynamic = "force-dynamic";
 
 const VALID_RESOLUTIONS = new Set(["MOVE_TO_END", "CANCEL_ALL"]);
+const VALID_TIMEOFF_TYPES = new Set([
+  "LATE_START",
+  "EARLY_LEAVE",
+  "FULL_DAY_OFF",
+  "CUSTOM_BLOCK",
+  "VACATION",
+]);
 
 class DayOverrideError extends Error {
   status: number;
@@ -38,7 +53,8 @@ class DayOverrideError extends Error {
 
 /**
  * Finds the earliest contiguous interval of `durationMs` starting at or after `initialCursorMs`
- * that fits inside one of `shiftWindows` (if defined) and does not collide with `occupiedIntervals`.
+ * that fits strictly inside one of `shiftWindows` and does not collide with `occupiedIntervals`.
+ * Returns null if `shiftWindows` is empty (never spills into non-working night hours).
  */
 function findNextAvailableSlotInShifts(params: {
   initialCursorMs: number;
@@ -55,12 +71,11 @@ function findNextAvailableSlotInShifts(params: {
     occupiedIntervals,
   } = params;
 
-  const windows =
-    shiftWindows.length > 0
-      ? shiftWindows
-      : [{ start: initialCursorMs, end: endOfDayMs }];
+  if (shiftWindows.length === 0) {
+    return null;
+  }
 
-  for (const win of windows) {
+  for (const win of shiftWindows) {
     let cursor = Math.max(initialCursorMs, win.start);
 
     while (cursor + durationMs <= win.end && cursor + durationMs <= endOfDayMs) {
@@ -104,9 +119,9 @@ export async function POST(req: Request) {
         resolution?: string;
       };
 
-    if (!staffId || !startAt || !endAt) {
+    if (!staffId || !startAt || !endAt || !type || typeof type !== "string" || !VALID_TIMEOFF_TYPES.has(type)) {
       return NextResponse.json(
-        { error: "Faltan datos obligatorios (staffId, startAt, endAt)" },
+        { error: "Faltan datos obligatorios o el tipo de bloqueo es inválido." },
         { status: 400 }
       );
     }
@@ -145,89 +160,7 @@ export async function POST(req: Request) {
       if (ownershipErr) return ownershipErr;
     }
 
-    const targetStaffRecords = await prisma.staffProfile.findMany({
-      where: staffId === "ALL" ? { isActive: true } : { id: staffId },
-      include: { workingShifts: true, timeOffs: true },
-    });
-
-    if (targetStaffRecords.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "No se encontraron profesionales activos para aplicar el bloqueo.",
-        },
-        { status: 404 }
-      );
-    }
-
-    const targetStaffIds = targetStaffRecords.map((s) => s.id);
     const now = new Date();
-
-    // Enforce temporal & state invariants
-    if (type === "VACATION") {
-      if (endDate <= now) {
-        return NextResponse.json(
-          { error: "No es posible programar vacaciones en fechas pasadas." },
-          { status: 400 }
-        );
-      }
-      const vacValidation = validateVacationRange({
-        startDate: formatLocalDateYYYYMMDD(startDate),
-        endDate: formatLocalDateYYYYMMDD(endDate),
-        targets: targetStaffRecords,
-        now,
-      });
-      if (!vacValidation.valid) {
-        return NextResponse.json(
-          { error: vacValidation.error },
-          { status: 400 }
-        );
-      }
-    } else if (
-      type === "LATE_START" ||
-      type === "EARLY_LEAVE" ||
-      type === "FULL_DAY_OFF"
-    ) {
-      const dateStr = formatLocalDateYYYYMMDD(startDate);
-      const timeStr =
-        type === "EARLY_LEAVE"
-          ? formatTimeHHmm(startDate)
-          : type === "LATE_START"
-          ? formatTimeHHmm(endDate)
-          : undefined;
-      const overrideValidation = validateScheduleOverride({
-        type,
-        dateStr,
-        timeStr,
-        targets: targetStaffRecords,
-        isAllTargets: staffId === "ALL",
-        now,
-      });
-
-      if (!overrideValidation.valid) {
-        return NextResponse.json(
-          { error: overrideValidation.error },
-          { status: 400 }
-        );
-      }
-    }
-
-    if (
-      resolution === "MOVE_TO_END" &&
-      (type === "FULL_DAY_OFF" ||
-        type === "VACATION" ||
-        type === "EARLY_LEAVE" ||
-        endDate.getHours() >= 22)
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "No es posible mover citas para después del bloqueo cuando se cierra la jornada o son vacaciones. Selecciona cancelar las citas afectadas.",
-        },
-        { status: 400 }
-      );
-    }
-
     const cleanInternalReason =
       typeof reason === "string" && reason.trim()
         ? reason.trim().slice(0, 300)
@@ -237,8 +170,86 @@ export async function POST(req: Request) {
         ? publicNote.trim().slice(0, 200)
         : null;
 
-    // Execute conflict detection, per-staff slot planning, appointment mutations, notifications, push deliveries, and TimeOff creation atomically
-    const txOutcome = await prisma.$transaction(async (tx) => {
+    // Execute validation, conflict detection, per-staff slot planning, appointment mutations, notifications, push deliveries, and TimeOff creation atomically
+    const txOutcome = await withImmediateLock(async (tx) => {
+      const settings = await tx.businessSettings.findFirst({
+        where: { id: 1 },
+        select: { timezone: true, pushHideDetails: true },
+      });
+      const businessTz = resolveBusinessTimeZone(settings?.timezone);
+      const hidePushDetails = Boolean(settings?.pushHideDetails);
+
+      const targetStaffRecords = await tx.staffProfile.findMany({
+        where: staffId === "ALL" ? { isActive: true } : { id: staffId },
+        include: { workingShifts: true, timeOffs: true },
+      });
+
+      if (targetStaffRecords.length === 0) {
+        throw new DayOverrideError(
+          "No se encontraron profesionales activos para aplicar el bloqueo.",
+          404
+        );
+      }
+
+      const targetStaffIds = targetStaffRecords.map((s) => s.id);
+
+      // Enforce temporal & state invariants
+      if (type === "VACATION") {
+        if (endDate <= now) {
+          throw new DayOverrideError(
+            "No es posible programar vacaciones en fechas pasadas.",
+            400
+          );
+        }
+        const vacValidation = validateVacationRange({
+          startDate: formatLocalDateYYYYMMDD(startDate, businessTz),
+          endDate: formatLocalDateYYYYMMDD(endDate, businessTz),
+          targets: targetStaffRecords,
+          now,
+        });
+        if (!vacValidation.valid) {
+          throw new DayOverrideError(vacValidation.error || "Rango de vacaciones inválido.", 400);
+        }
+      } else if (
+        type === "LATE_START" ||
+        type === "EARLY_LEAVE" ||
+        type === "FULL_DAY_OFF"
+      ) {
+        const dateStr = formatLocalDateYYYYMMDD(startDate, businessTz);
+        const timeStr =
+          type === "EARLY_LEAVE"
+            ? formatTimeHHmm(startDate, businessTz)
+            : type === "LATE_START"
+            ? formatTimeHHmm(endDate, businessTz)
+            : undefined;
+        const overrideValidation = validateScheduleOverride({
+          type,
+          dateStr,
+          timeStr,
+          targets: targetStaffRecords,
+          isAllTargets: staffId === "ALL",
+          now,
+        });
+
+        if (!overrideValidation.valid) {
+          throw new DayOverrideError(overrideValidation.error || "Bloqueo inválido.", 400);
+        }
+      }
+
+      const endHourInTz = Number(formatTimeHHmm(endDate, businessTz).split(":")[0]);
+      if (
+        resolution === "MOVE_TO_END" &&
+        (type === "FULL_DAY_OFF" ||
+          type === "VACATION" ||
+          type === "EARLY_LEAVE" ||
+          endHourInTz >= 22)
+      ) {
+        throw new DayOverrideError(
+          "No es posible mover citas para después del bloqueo cuando se cierra la jornada o son vacaciones. Selecciona cancelar las citas afectadas.",
+          400
+        );
+      }
+
       const conflicting = await tx.appointment.findMany({
         where: {
           staffId: { in: targetStaffIds },
@@ -270,9 +281,9 @@ export async function POST(req: Request) {
       }
 
       const emittedEvents: RealtimeEventPayload[] = [];
-      const dayStr = formatLocalDateYYYYMMDD(endDate);
-      const endOfDay = new Date(`${dayStr}T23:59:59.999`);
-      const dayOfWeek = new Date(`${dayStr}T00:00:00`).getDay();
+      const dayStr = formatLocalDateYYYYMMDD(endDate, businessTz);
+      const { endOfDay } = getDayBoundsInTz(dayStr, businessTz);
+      const dayOfWeek = getDayOfWeekInTz(dayStr, businessTz);
 
       if (conflicting.length > 0 && resolution === "MOVE_TO_END") {
         // Compute an independent relocation plan per professional
@@ -318,8 +329,8 @@ export async function POST(req: Request) {
           const shiftWindows = staffRecord.workingShifts
             .filter((s) => s.dayOfWeek === dayOfWeek)
             .map((s) => ({
-              start: parseDateAndTime(dayStr, s.startTime).getTime(),
-              end: parseDateAndTime(dayStr, s.endTime).getTime(),
+              start: parseDateAndTime(dayStr, s.startTime, businessTz).getTime(),
+              end: parseDateAndTime(dayStr, s.endTime, businessTz).getTime(),
             }))
             .filter((w) => w.end > w.start)
             .sort((a, b) => a.start - b.start);
@@ -380,19 +391,9 @@ export async function POST(req: Request) {
             }
 
             const oldStartDate = new Date(apt.startAt);
-            const oldTimeStr = oldStartDate.toLocaleTimeString("es-ES", {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            const newTimeStr = newStart.toLocaleTimeString("es-ES", {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            const newDateStr = newStart.toLocaleDateString("es-ES", {
-              weekday: "short",
-              day: "numeric",
-              month: "short",
-            });
+            const oldTimeStr = formatSpanishTimeInTz(oldStartDate, businessTz);
+            const newTimeStr = formatSpanishTimeInTz(newStart, businessTz);
+            const newDateStr = formatSpanishDateInTz(newStart, businessTz);
             const serviceLabel = apt.service?.name || "Servicio";
             const staffLabel = apt.staff?.displayName || "el profesional";
             const reasonLabel = cleanInternalReason || "Imprevisto de agenda";
@@ -414,8 +415,12 @@ export async function POST(req: Request) {
               notificationId: notif.id,
               recipientUserIds: [apt.customerId],
               actorUserId: user.id,
-              title: `🕒 Nuevo horario: ${serviceLabel} (${newTimeStr})`,
-              body: `${staffLabel} reprogramó tu cita de ${serviceLabel} (antes ${oldTimeStr}) para el ${newDateStr} a las ${newTimeStr} por "${reasonLabel}". Toca para confirmar o cancelar sin cargo.`,
+              title: hidePushDetails
+                ? "Cambio de horario en tu cita"
+                : `🕒 Nuevo horario: ${serviceLabel} (${newTimeStr})`,
+              body: hidePushDetails
+                ? "Tu cita fue reprogramada. Toca para confirmar o revisar el nuevo horario."
+                : `${staffLabel} reprogramó tu cita de ${serviceLabel} (antes ${oldTimeStr}) para el ${newDateStr} a las ${newTimeStr} por "${reasonLabel}". Toca para confirmar o cancelar sin cargo.`,
               targetPath: `/?tab=my-appointments&appointmentId=${encodeURIComponent(apt.id)}`,
               tag: `apt-move-${apt.id}`,
             });
@@ -468,18 +473,15 @@ export async function POST(req: Request) {
 
           let pushTitle: string;
           let pushBody: string;
-          if (apts.length === 1) {
+          if (hidePushDetails) {
+            pushTitle = "Actualización importante de tu agenda";
+            pushBody =
+              "Se cancelaron una o más citas por un cierre de agenda. Toca para reagendar.";
+          } else if (apts.length === 1) {
             const apt0 = apts[0];
             const apt0Date = new Date(apt0.startAt);
-            const time0 = apt0Date.toLocaleTimeString("es-ES", {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            const date0 = apt0Date.toLocaleDateString("es-ES", {
-              weekday: "short",
-              day: "numeric",
-              month: "short",
-            });
+            const time0 = formatSpanishTimeInTz(apt0Date, businessTz);
+            const date0 = formatSpanishDateInTz(apt0Date, businessTz);
             const service0 = apt0.service?.name || "Servicio";
             const staff0 = apt0.staff?.displayName || "El profesional";
             pushTitle = `⚠️ Cita cancelada: ${service0} (${time0})`;
@@ -521,9 +523,11 @@ export async function POST(req: Request) {
           },
         });
       } else if (type === "LATE_START" || type === "EARLY_LEAVE") {
-        const startDayStr = formatLocalDateYYYYMMDD(startDate);
-        const dayStartBound = new Date(`${startDayStr}T00:00:00`);
-        const dayEndBound = new Date(`${startDayStr}T23:59:59.999`);
+        const startDayStr = formatLocalDateYYYYMMDD(startDate, businessTz);
+        const { startOfDay: dayStartBound, endOfDay: dayEndBound } = getDayBoundsInTz(
+          startDayStr,
+          businessTz
+        );
         await tx.timeOff.deleteMany({
           where: {
             staffId: { in: targetStaffIds },
@@ -541,7 +545,7 @@ export async function POST(req: Request) {
             staffId: tStaffId,
             startAt: startDate,
             endAt: endDate,
-            type: type || "CUSTOM_BLOCK",
+            type,
             reason: cleanInternalReason,
             publicNote: cleanPublicNote,
           },
@@ -561,7 +565,9 @@ export async function POST(req: Request) {
       return NextResponse.json({
         hasConflicts: true,
         message: `Existen ${txOutcome.conflicting.length} cita(s) agendada(s) en este horario.`,
-        affectedAppointments: txOutcome.conflicting,
+        affectedAppointments: txOutcome.conflicting.map((apt) =>
+          sanitizeAppointmentForClient(apt, user.role)
+        ),
       });
     }
 

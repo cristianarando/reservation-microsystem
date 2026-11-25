@@ -13,6 +13,8 @@ import {
   sanitizeHttpUrl,
   sanitizeImageOrDataUrl,
 } from "@/lib/validation/input-validators";
+import { isValidTimeZone } from "@/lib/timezone";
+import { emitRealtimeEvent } from "@/lib/realtime-events";
 
 export const dynamic = "force-dynamic";
 
@@ -103,7 +105,20 @@ export async function PUT(req: Request) {
           body.themeSurfaceHex !== undefined
             ? sanitizeHexColor(body.themeSurfaceHex, "#9FA0A6")
             : undefined,
+        timezone:
+          body.timezone !== undefined && isValidTimeZone(body.timezone)
+            ? body.timezone.trim()
+            : undefined,
+        pushHideDetails:
+          body.pushHideDetails !== undefined
+            ? Boolean(body.pushHideDetails)
+            : undefined,
       },
+    });
+
+    emitRealtimeEvent({
+      type: "SCHEDULE_UPDATED",
+      actorUserId: auth.user.id,
     });
 
     return NextResponse.json({ ok: true, settings: updated });
