@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { sanitizeUserForClient } from "@/lib/api-guard";
+import { sanitizeStaffForViewer, sanitizeUserForClient } from "@/lib/api-guard";
 import { getCurrentUser, getImpersonatorId } from "@/lib/session";
 import { getCustomerBootstrapAppointments } from "@/lib/appointment-queries";
 import { DEFAULT_BUSINESS_LOGO } from "@/lib/avatars";
@@ -133,26 +133,14 @@ export async function getBootstrapPayload(
     },
   });
 
-  // Public staff payload must not leak the linked account id or internal TimeOff reasons.
-  const safeStaff: PortalStaffMember[] = isStaffOrAdmin
-    ? staff
-    : staff.map(({ timeOffs, ...rest }) => {
-        const publicStaff: PortalStaffMember = {
-          ...rest,
-          timeOffs: (timeOffs || []).map((t) => ({
-            id: t.id,
-            staffId: t.staffId,
-            startAt: t.startAt,
-            endAt: t.endAt,
-            type: t.type,
-            reason: t.publicNote ?? null,
-            publicNote: t.publicNote ?? null,
-            createdAt: t.createdAt,
-          })),
-        };
-        delete publicStaff.userId;
-        return publicStaff;
-      });
+  // Public visitors and peer PROVIDERs never receive other doctors' private PII or internal TimeOff reasons.
+  const viewerScope = {
+    role: options.publicOnly ? null : currentUser?.role ?? null,
+    userId: options.publicOnly ? null : currentUser?.id ?? null,
+  };
+  const safeStaff: PortalStaffMember[] = staff.map(
+    (s) => sanitizeStaffForViewer(s, viewerScope) as PortalStaffMember
+  );
 
   let userAppointments: PortalAppointment[] = [];
   let userHistory: BootstrapHistoryPage = {
@@ -231,6 +219,7 @@ export async function getBootstrapPayload(
         isBlocked: true,
         noShowCount: true,
         completedCount: true,
+        adminNotes: true,
       },
       ...(options.usersLimit && options.usersLimit > 0
         ? { take: options.usersLimit }

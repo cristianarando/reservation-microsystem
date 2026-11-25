@@ -2,7 +2,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, getImpersonatorId } from "@/lib/session";
-import { safeErrorResponse, verifySameOrigin } from "@/lib/api-guard";
+import { parseJsonObject, safeErrorResponse, verifySameOrigin } from "@/lib/api-guard";
+import { consumeRateLimit, getClientIp, tooManyRequestsBody } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,18 @@ export async function POST(req: Request) {
     const originErr = verifySameOrigin(req);
     if (originErr) return originErr;
 
-    const body = await req.json().catch(() => ({}));
+    const ip = getClientIp(req);
+    const rate = consumeRateLimit(`push-reconcile:${ip}`, 30, 5 * 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(tooManyRequestsBody(rate.retryAfterSec), {
+        status: 429,
+        headers: { "Retry-After": String(rate.retryAfterSec) },
+      });
+    }
+
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const body = parsedBody.data;
     const endpoint =
       typeof body.endpoint === "string" ? body.endpoint.trim() : "";
 
@@ -61,7 +73,6 @@ export async function POST(req: Request) {
       return NextResponse.json({
         ok: true,
         boundToCurrentUser: false,
-        unboundPreviousOwner: true,
       });
     }
 

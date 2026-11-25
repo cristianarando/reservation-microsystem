@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/session";
 import { canCustomerCancelAppointment } from "@/lib/booking-rules";
 import {
   safeErrorResponse,
+  sanitizeAppointmentForClient,
   verifyProviderOwnsStaff,
   verifySameOrigin,
 } from "@/lib/api-guard";
@@ -89,7 +90,7 @@ export async function POST(
     return NextResponse.json({
       ok: true,
       idempotent: result.alreadyCancelled,
-      appointment: result.appointment,
+      appointment: sanitizeAppointmentForClient(result.appointment, user.role),
     });
   } catch (error: unknown) {
     return safeErrorResponse(error, "No se pudo cancelar la cita.");

@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  parseJsonObject,
   requireAdmin,
   safeErrorResponse,
   sanitizeUserForClient,
@@ -22,7 +23,9 @@ export async function PUT(
     if (auth.error) return auth.error;
 
     const { id } = await params;
-    const body = await req.json().catch(() => ({}));
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const body = parsedBody.data;
 
     const updated = await prisma.$transaction(async (tx) => {
       const freshTarget = await tx.user.findUnique({ where: { id } });
@@ -30,8 +33,8 @@ export async function PUT(
         throw new Error("USER_NOT_FOUND");
       }
 
-      if (freshTarget.role === "ADMIN") {
-        throw new Error("CANNOT_BLOCK_ADMIN");
+      if (freshTarget.role !== "CUSTOMER") {
+        throw new Error("CANNOT_BLOCK_STAFF_OR_ADMIN");
       }
 
       let newBlockedState =
@@ -82,14 +85,17 @@ export async function PUT(
       });
     });
 
-    return NextResponse.json({ ok: true, user: sanitizeUserForClient(updated) });
+    return NextResponse.json({
+      ok: true,
+      user: sanitizeUserForClient(updated, { includeAdminNotes: true }),
+    });
   } catch (error: unknown) {
     if (error instanceof Error && error.message === "USER_NOT_FOUND") {
       return NextResponse.json({ error: "Usuario no encontrado" }, { status: 404 });
     }
-    if (error instanceof Error && error.message === "CANNOT_BLOCK_ADMIN") {
+    if (error instanceof Error && error.message === "CANNOT_BLOCK_STAFF_OR_ADMIN") {
       return NextResponse.json(
-        { error: "No se puede bloquear la cuenta del Administrador principal." },
+        { error: "Solo se pueden bloquear o gestionar faltas de cuentas de clientes." },
         { status: 400 }
       );
     }

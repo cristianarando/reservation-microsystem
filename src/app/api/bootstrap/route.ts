@@ -1,6 +1,7 @@
 // src/app/api/bootstrap/route.ts
 import { NextResponse } from "next/server";
 import { EMPTY_BOOTSTRAP_PAYLOAD, getBootstrapPayload } from "@/lib/bootstrap";
+import { redactSensitiveLogText } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,8 @@ export async function GET(req: Request) {
     });
     return NextResponse.json(payload);
   } catch (error: unknown) {
-    console.error("Bootstrap error:", error);
+    const rawMsg = error instanceof Error ? error.message : String(error ?? "Unknown error");
+    console.error("Bootstrap error:", redactSensitiveLogText(rawMsg));
     return NextResponse.json(
       {
         error: "Error al cargar datos",

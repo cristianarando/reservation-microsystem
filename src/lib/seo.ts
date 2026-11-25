@@ -574,6 +574,7 @@ export async function resolveSatoriImageDataUri(
   }
 
   try {
+    const { safeExternalFetch } = await import("@/lib/ssrf-guard");
     let fetchUrl = trimmed;
     const parsed = new URL(trimmed);
     // Hint Unsplash/CDN to deliver JPEG rather than WebP so Satori renders reliably
@@ -582,8 +583,9 @@ export async function resolveSatoriImageDataUri(
       fetchUrl = parsed.toString();
     }
 
-    const res = await fetch(fetchUrl, {
-      signal: AbortSignal.timeout(2500),
+    const { res, buffer } = await safeExternalFetch(fetchUrl, {
+      timeoutMs: 2500,
+      maxBytes: 1_500_000,
       headers: { Accept: "image/png, image/jpeg, image/*;q=0.8" },
     });
     if (!res.ok) return null;
@@ -593,10 +595,9 @@ export async function resolveSatoriImageDataUri(
       return null;
     }
 
-    const arrBuf = await res.arrayBuffer();
-    if (arrBuf.byteLength === 0 || arrBuf.byteLength > 2_000_000) return null;
+    if (buffer.byteLength === 0 || buffer.byteLength > 1_500_000) return null;
 
-    const b64 = Buffer.from(arrBuf).toString("base64");
+    const b64 = buffer.toString("base64");
     return `data:${ct === "image/jpg" ? "image/jpeg" : ct};base64,${b64}`;
   } catch {
     return null;

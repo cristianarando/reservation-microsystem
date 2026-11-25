@@ -4,6 +4,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { clearImpersonator, setSessionUserId } from "@/lib/session";
 import {
+  parseJsonObject,
   safeErrorResponse,
   sanitizeUserForClient,
   verifySameOrigin,
@@ -39,7 +40,9 @@ export async function POST(req: Request) {
       });
     }
 
-    const body = await req.json().catch(() => ({}));
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const body = parsedBody.data;
     const email = normalizeEmail(body.email);
     const token = typeof body.token === "string" ? body.token.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
@@ -93,16 +96,23 @@ export async function POST(req: Request) {
 
     const newPasswordHash = await bcrypt.hash(password, 10);
 
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        role: user.role === "ADMIN" ? "ADMIN" : "PROVIDER",
-        passwordHash: newPasswordHash,
-        pendingStaffUpgrade: false,
-        staffInviteTokenHash: null,
-        staffInviteExpiresAt: null,
-        sessionVersion: { increment: 1 },
-      },
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: user.id },
+        data: {
+          role: user.role === "ADMIN" ? "ADMIN" : "PROVIDER",
+          passwordHash: newPasswordHash,
+          pendingStaffUpgrade: false,
+          staffInviteTokenHash: null,
+          staffInviteExpiresAt: null,
+          sessionVersion: { increment: 1 },
+        },
+      });
+      await tx.staffProfile.update({
+        where: { id: user.staffProfile!.id },
+        data: { isActive: true },
+      });
+      return updated;
     });
 
     await clearImpersonator();

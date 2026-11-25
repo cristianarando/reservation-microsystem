@@ -11,6 +11,7 @@ import {
 } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { validateSafeExternalUrl } from "@/lib/ssrf-guard";
 
 export type PushEventType =
   | "APPOINTMENT_CREATED"
@@ -173,42 +174,14 @@ export function validatePushSubscriptionInput(raw: unknown):
     return { ok: false, error: "Endpoint de suscripción push inválido." };
   }
 
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(obj.endpoint.trim());
-  } catch {
-    return { ok: false, error: "URL del servicio push inválida." };
+  const safeEndpointCheck = validateSafeExternalUrl(obj.endpoint.trim(), {
+    requireHttps: true,
+    allowStandardPortsOnly: true,
+  });
+  if (!safeEndpointCheck.ok) {
+    return { ok: false, error: safeEndpointCheck.error };
   }
-
-  if (parsedUrl.protocol !== "https:") {
-    return {
-      ok: false,
-      error: "El servicio Web Push requiere un destino HTTPS seguro.",
-    };
-  }
-
-  if (parsedUrl.username || parsedUrl.password) {
-    return {
-      ok: false,
-      error: "El endpoint push no debe incluir credenciales en la URL.",
-    };
-  }
-
-  const host = parsedUrl.hostname.toLowerCase();
-  if (
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "0.0.0.0" ||
-    host.startsWith("10.") ||
-    host.startsWith("192.168.") ||
-    host.startsWith("169.254.") ||
-    host === "[::1]"
-  ) {
-    return {
-      ok: false,
-      error: "El destino del servicio push no puede apuntar a una red privada.",
-    };
-  }
+  const parsedUrl = safeEndpointCheck.url;
 
   const rawP256dh =
     typeof obj.keys?.p256dh === "string" ? obj.keys.p256dh.trim() : "";
@@ -464,10 +437,18 @@ async function defaultHttpPushTransport(
     // Ignore malformed origin
   }
   try {
-    const res = await fetch(req.endpoint, {
+    const safeUrlCheck = validateSafeExternalUrl(req.endpoint, {
+      requireHttps: true,
+      allowStandardPortsOnly: true,
+    });
+    if (!safeUrlCheck.ok) {
+      return { status: 400, errorText: safeUrlCheck.error };
+    }
+    const res = await fetch(safeUrlCheck.url.toString(), {
       method: "POST",
       headers: req.headers,
       body: new Uint8Array(req.body),
+      redirect: "error",
       signal: controller.signal,
     });
     const retryAfterHeader = res.headers.get("retry-after");

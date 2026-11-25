@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getImpersonatorId } from "@/lib/session";
 import {
+  parseJsonObject,
   requireAuth,
   safeErrorResponse,
   verifySameOrigin,
@@ -54,7 +55,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = await req.json().catch(() => ({}));
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const body = parsedBody.data;
     const currentEndpoint =
       typeof body?.endpoint === "string" ? body.endpoint.trim() : "";
 

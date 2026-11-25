@@ -1,5 +1,7 @@
 // src/lib/validation/input-validators.ts
 
+import { validateSafeExternalUrl } from "@/lib/ssrf-guard";
+
 export const VALID_APPOINTMENT_STATUSES = [
   "CONFIRMED",
   "RESCHEDULED_BY_STAFF",
@@ -56,15 +58,14 @@ export function sanitizeImageOrDataUrl(
     return { ok: true, value: trimmed };
   }
 
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-      return { ok: false, error: "Solo se permiten URLs de imagen http:// o https://." };
-    }
-    return { ok: true, value: trimmed };
-  } catch {
-    return { ok: false, error: "URL de imagen inválida." };
+  const urlCheck = validateSafeExternalUrl(trimmed, {
+    requireHttps: false,
+    allowStandardPortsOnly: true,
+  });
+  if (!urlCheck.ok) {
+    return { ok: false, error: urlCheck.error };
   }
+  return { ok: true, value: trimmed };
 }
 
 /**

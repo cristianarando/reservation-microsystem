@@ -2,8 +2,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  parseJsonObject,
   requireStaffOrAdmin,
   safeErrorResponse,
+  sanitizeAppointmentForClient,
   sanitizeUserForClient,
   verifyProviderOwnsStaff,
   verifySameOrigin,
@@ -41,8 +43,9 @@ export async function PUT(
     const { user } = auth;
 
     const { id } = await params;
-    const body = await req.json().catch(() => ({}));
-    const { status, reason, blockCustomer } = body;
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const { status, reason, blockCustomer } = parsedBody.data;
 
     if (
       typeof status !== "string" ||
@@ -203,13 +206,14 @@ export async function PUT(
       );
       const nextNoShow = Math.max(0, freshCustomer.noShowCount + noShowDelta);
 
-      const canModifyBlock = user.role === "ADMIN" || status === "NO_SHOW";
+      const isTargetCustomer = freshCustomer.role === "CUSTOMER";
+      const canManualBlockOverride = user.role === "ADMIN" && isTargetCustomer;
       let nextBlocked = freshCustomer.isBlocked;
-      if (status === "NO_SHOW") {
-        if (blockCustomer || nextNoShow >= 2) {
+      if (isTargetCustomer && status === "NO_SHOW") {
+        if ((canManualBlockOverride && blockCustomer) || nextNoShow >= 2) {
           nextBlocked = true;
         }
-      } else if (canModifyBlock && blockCustomer !== undefined) {
+      } else if (canManualBlockOverride && blockCustomer !== undefined) {
         nextBlocked = Boolean(blockCustomer);
       }
 
@@ -255,8 +259,10 @@ export async function PUT(
     return NextResponse.json({
       ok: true,
       idempotent: result.idempotent,
-      appointment: result.updated,
-      customer: sanitizeUserForClient(result.finalCustomer),
+      appointment: sanitizeAppointmentForClient(result.updated, user.role),
+      customer: sanitizeUserForClient(result.finalCustomer, {
+        includeAdminNotes: user.role === "ADMIN",
+      }),
     });
   } catch (error: unknown) {
     if (error instanceof StatusTransitionError) {

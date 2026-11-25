@@ -19,51 +19,29 @@ export async function GET(req: Request) {
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Configuración de Google OAuth Requerida</title>
-        <script src="https://cdn.tailwindcss.com"></script>
+        <title>Google OAuth no configurado</title>
+        <style>
+          body{margin:0;background:#EBEBEF;color:#1F1F23;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+          .card{max-width:420px;width:100%;background:#fff;border-radius:24px;padding:32px;border:1px solid #e4e4e7;box-shadow:0 12px 30px rgba(0,0,0,.08);text-align:center}
+          .badge{width:48px;height:48px;border-radius:16px;background:#f59e0b;color:#fff;font-weight:700;font-size:20px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px}
+          .btn{display:block;margin-top:20px;padding:12px 20px;border-radius:9999px;background:#1F1F23;color:#fff;text-decoration:none;font-weight:700;font-size:13px}
+        </style>
       </head>
-      <body class="bg-[#EBEBEF] min-h-screen flex items-center justify-center p-4 text-[#1F1F23]">
-        <div class="max-w-md w-full bg-white rounded-3xl p-8 shadow-xl border border-zinc-200 space-y-5">
-          <div class="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center font-bold text-xl shadow-md mx-auto">
-            G
-          </div>
-          <div class="text-center space-y-1">
-            <h1 class="text-lg font-bold text-zinc-900">Configuración de Google OAuth</h1>
-            <p class="text-xs text-zinc-500">
-              Para habilitar el inicio de sesión real con Google, agrega tus credenciales en el archivo <code>.env</code>
-            </p>
-          </div>
-
-          <div class="bg-zinc-50 border border-zinc-200 rounded-2xl p-4 text-xs space-y-2 text-zinc-700">
-            <div class="font-bold text-zinc-900">Pasos rápidos en Google Cloud Console:</div>
-            <ol class="list-decimal list-inside space-y-1 text-zinc-600">
-              <li>Crea un proyecto en <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">console.cloud.google.com</a>.</li>
-              <li>Ve a <b>APIs & Services → Credentials</b>.</li>
-              <li>Crea una <b>OAuth 2.0 Client ID (Web Application)</b>.</li>
-              <li>Agrega en <b>Authorized Redirect URIs</b>:
-                <code class="block mt-1 bg-white p-2 rounded-lg border border-zinc-300 font-mono text-[11px] text-zinc-800 break-all select-all">
-                  ${baseUrl}/api/auth/google/callback
-                </code>
-              </li>
-              <li>Copia las credenciales a tu archivo <code>.env</code>:
-                <pre class="mt-1 bg-zinc-900 text-emerald-400 p-2.5 rounded-lg text-[11px] overflow-x-auto">GOOGLE_CLIENT_ID="tu-client-id.apps.googleusercontent.com"
-GOOGLE_CLIENT_SECRET="tu-client-secret"</pre>
-              </li>
-            </ol>
-          </div>
-
-          <div class="pt-2 flex flex-col gap-2">
-            <a href="${returnTo}" class="w-full py-3 rounded-full bg-[#1F1F23] hover:bg-black text-white text-xs font-bold text-center transition-all shadow-md">
-              ← Volver a la aplicación
-            </a>
-          </div>
+      <body>
+        <div class="card">
+          <div class="badge">G</div>
+          <h1 style="font-size:18px;margin:0 0 8px">Inicio con Google no disponible</h1>
+          <p style="font-size:13px;color:#52525b;margin:0">
+            El inicio de sesión con Google aún no está habilitado en este servidor. Puedes ingresar con tu correo y contraseña.
+          </p>
+          <a href="${returnTo}" class="btn">← Volver a la aplicación</a>
         </div>
       </body>
       </html>
     `;
     return new Response(errorHtml, {
       headers: { "Content-Type": "text/html; charset=utf-8" },
-      status: 200,
+      status: 503,
     });
   }
 

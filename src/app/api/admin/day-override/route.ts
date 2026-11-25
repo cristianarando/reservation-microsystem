@@ -1,7 +1,6 @@
 // src/app/api/admin/day-override/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/session";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
 import { formatTimeHHmm, parseDateAndTime } from "@/lib/slot-engine";
 import {
@@ -9,7 +8,13 @@ import {
   validateVacationRange,
 } from "@/lib/validation/acceptance-criteria";
 import { emitRealtimeEvent, RealtimeEventPayload } from "@/lib/realtime-events";
-import { safeErrorResponse, verifySameOrigin } from "@/lib/api-guard";
+import {
+  parseJsonObject,
+  requireStaffOrAdmin,
+  safeErrorResponse,
+  verifyProviderOwnsStaff,
+  verifySameOrigin,
+} from "@/lib/api-guard";
 import {
   cancelAppointmentInTx,
   createIdempotentNotificationInTx,
@@ -82,13 +87,22 @@ export async function POST(req: Request) {
     const originErr = verifySameOrigin(req);
     if (originErr) return originErr;
 
-    const user = await getCurrentUser();
-    if (!user || (user.role !== "ADMIN" && user.role !== "PROVIDER")) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-    }
+    const auth = await requireStaffOrAdmin();
+    if (auth.error) return auth.error;
+    const { user } = auth;
 
-    const body = await req.json().catch(() => ({}));
-    const { staffId, type, startAt, endAt, reason, publicNote, resolution } = body;
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const { staffId, type, startAt, endAt, reason, publicNote, resolution } =
+      parsedBody.data as {
+        staffId?: string;
+        type?: string;
+        startAt?: string;
+        endAt?: string;
+        reason?: string;
+        publicNote?: string;
+        resolution?: string;
+      };
 
     if (!staffId || !startAt || !endAt) {
       return NextResponse.json(
@@ -127,18 +141,8 @@ export async function POST(req: Request) {
     }
 
     if (user.role === "PROVIDER") {
-      const ownStaff = await prisma.staffProfile.findFirst({
-        where: { userId: user.id },
-      });
-      if (!ownStaff || ownStaff.id !== staffId) {
-        return NextResponse.json(
-          {
-            error:
-              "Solo puedes gestionar bloqueos y cierres sobre tu propia agenda.",
-          },
-          { status: 403 }
-        );
-      }
+      const ownershipErr = await verifyProviderOwnsStaff(user, staffId);
+      if (ownershipErr) return ownershipErr;
     }
 
     const targetStaffRecords = await prisma.staffProfile.findMany({
@@ -593,10 +597,9 @@ export async function DELETE(req: Request) {
     const originErr = verifySameOrigin(req);
     if (originErr) return originErr;
 
-    const user = await getCurrentUser();
-    if (!user || (user.role !== "ADMIN" && user.role !== "PROVIDER")) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-    }
+    const auth = await requireStaffOrAdmin();
+    if (auth.error) return auth.error;
+    const { user } = auth;
 
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
@@ -613,18 +616,8 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Bloqueo no encontrado" }, { status: 404 });
     }
 
-    // Role check: PROVIDER can only delete their own TimeOff blocks
-    if (user.role === "PROVIDER") {
-      const ownStaff = await prisma.staffProfile.findFirst({
-        where: { userId: user.id },
-      });
-      if (!ownStaff || ownStaff.id !== existing.staffId) {
-        return NextResponse.json(
-          { error: "Solo puedes eliminar tus propios bloqueos de horario." },
-          { status: 403 }
-        );
-      }
-    }
+    const ownershipErr = await verifyProviderOwnsStaff(user, existing.staffId);
+    if (ownershipErr) return ownershipErr;
 
     await prisma.timeOff.delete({ where: { id } });
 

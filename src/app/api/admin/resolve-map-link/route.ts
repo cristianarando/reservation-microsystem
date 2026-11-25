@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import {
+  parseJsonObject,
   requireAdmin,
   safeErrorResponse,
   verifySameOrigin,
 } from "@/lib/api-guard";
+import { consumeRateLimit, tooManyRequestsBody } from "@/lib/rate-limit";
+import { validateSafeExternalUrl } from "@/lib/ssrf-guard";
 import {
   buildGoogleMapsUrl,
   isValidCoords,
@@ -104,8 +107,17 @@ export async function POST(req: Request) {
     const auth = await requireAdmin();
     if (auth.error) return auth.error;
 
-    const body = (await req.json().catch(() => null)) as { url?: unknown } | null;
-    const rawUrl = typeof body?.url === "string" ? body.url.trim() : "";
+    const rate = consumeRateLimit(`resolve-map:${auth.user.id}`, 20, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(tooManyRequestsBody(rate.retryAfterSec), {
+        status: 429,
+        headers: { "Retry-After": String(rate.retryAfterSec) },
+      });
+    }
+
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const rawUrl = typeof parsedBody.data.url === "string" ? parsedBody.data.url.trim() : "";
 
     if (!rawUrl || rawUrl.length > 2048) {
       return NextResponse.json(
@@ -151,15 +163,15 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!isAllowedGoogleMapsUrl(currentUrl)) {
-      return NextResponse.json(
-        {
-          error:
-            "Solo se admiten enlaces de Google Maps (google.com/maps, maps.google.com, maps.app.goo.gl o goo.gl/maps).",
-        },
-        { status: 400 }
-      );
-    }
+      if (!isAllowedGoogleMapsUrl(currentUrl) || !validateSafeExternalUrl(currentUrl.toString()).ok) {
+        return NextResponse.json(
+          {
+            error:
+              "Solo se admiten enlaces de Google Maps (google.com/maps, maps.google.com, maps.app.goo.gl o goo.gl/maps).",
+          },
+          { status: 400 }
+        );
+      }
 
     let finalUrl = currentUrl.toString();
     let htmlBody = "";
@@ -219,7 +231,10 @@ export async function POST(req: Request) {
       }
 
       if (res.ok) {
-        htmlBody = await res.text();
+        const rawText = await res.text();
+        htmlBody = rawText.slice(0, MAX_HTML_CHARS);
+      } else {
+        await res.body?.cancel().catch(() => {});
       }
       break;
     }

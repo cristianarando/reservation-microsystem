@@ -1,6 +1,7 @@
 // src/app/api/appointments/history/route.ts
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
+import { safeErrorResponse } from "@/lib/api-guard";
 import {
   getCustomerHistoryPage,
   HISTORY_PAGE_SIZE,
@@ -35,11 +36,7 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json(page);
-  } catch (error) {
-    console.error("Error fetching appointment history page:", error);
-    return NextResponse.json(
-      { error: "No se pudo cargar el historial de citas." },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return safeErrorResponse(error, "No se pudo cargar el historial de citas.");
   }
 }

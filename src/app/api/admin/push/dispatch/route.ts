@@ -1,6 +1,7 @@
 // src/app/api/admin/push/dispatch/route.ts
 import { NextResponse } from "next/server";
 import {
+  parseJsonObject,
   requireAdmin,
   safeErrorResponse,
   verifySameOrigin,
@@ -37,8 +38,14 @@ export async function POST(req: Request) {
     const auth = await requireAdmin();
     if (auth.error) return auth.error;
 
-    const body = await req.json().catch(() => ({}));
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const body = parsedBody.data;
     const action = typeof body.action === "string" ? body.action : "dispatch";
+    const ALLOWED_ACTIONS = new Set(["dispatch", "pause", "resume", "expire_stale"]);
+    if (!ALLOWED_ACTIONS.has(action)) {
+      return NextResponse.json({ error: "Acción inválida." }, { status: 400 });
+    }
 
     if (action === "pause") {
       setPushDispatcherPaused(true);

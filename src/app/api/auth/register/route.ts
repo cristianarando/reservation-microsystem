@@ -1,7 +1,14 @@
 // src/app/api/auth/register/route.ts
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { setSessionUserId } from "@/lib/session";
+import { clearImpersonator, setSessionUserId } from "@/lib/session";
+import {
+  parseJsonObject,
+  safeErrorResponse,
+  sanitizeUserForClient,
+  verifySameOrigin,
+} from "@/lib/api-guard";
 import {
   consumeRateLimit,
   getClientIp,
@@ -13,9 +20,13 @@ export const dynamic = "force-dynamic";
 
 const REGISTER_WINDOW_MS = 15 * 60 * 1000;
 const MAX_REGISTRATIONS_PER_IP = 15;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(req: Request) {
   try {
+    const originErr = verifySameOrigin(req);
+    if (originErr) return originErr;
+
     const ip = getClientIp(req);
     const rate = consumeRateLimit(`register:ip:${ip}`, MAX_REGISTRATIONS_PER_IP, REGISTER_WINDOW_MS);
     if (!rate.allowed) {
@@ -25,8 +36,9 @@ export async function POST(req: Request) {
       });
     }
 
-    const body = await req.json().catch(() => ({}));
-    const { name, email, password, phone } = body;
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const { name, email, password, phone } = parsedBody.data;
 
     if (!name || typeof name !== "string" || name.trim().length < 2 || name.trim().length > 100) {
       return NextResponse.json(
@@ -35,7 +47,12 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!email || typeof email !== "string" || !email.includes("@") || email.length > 254) {
+    if (
+      !email ||
+      typeof email !== "string" ||
+      email.length > 254 ||
+      !EMAIL_REGEX.test(email.trim())
+    ) {
       return NextResponse.json(
         { error: "Por favor ingresa un correo electrónico válido." },
         { status: 400 }
@@ -50,8 +67,11 @@ export async function POST(req: Request) {
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone =
+      typeof phone === "string" && phone.trim().length > 0
+        ? phone.trim().slice(0, 40)
+        : null;
 
-    // Check if user already exists
     const existing = await prisma.user.findUnique({
       where: { email: cleanEmail },
     });
@@ -66,7 +86,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
@@ -74,28 +93,28 @@ export async function POST(req: Request) {
         name: name.trim(),
         email: cleanEmail,
         passwordHash,
-        phone: phone ? phone.trim() : null,
+        phone: cleanPhone,
         role: "CUSTOMER",
       },
     });
 
+    await clearImpersonator();
     await setSessionUserId(user.id, user.sessionVersion);
 
     return NextResponse.json({
       ok: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        phone: user.phone,
-      },
+      user: sanitizeUserForClient(user),
     });
   } catch (error: unknown) {
-    console.error("Register error:", error);
-    return NextResponse.json(
-      { error: "No se pudo completar el registro. Intenta nuevamente." },
-      { status: 500 }
-    );
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return NextResponse.json(
+        {
+          error:
+            "Ya existe una cuenta con este correo electrónico. Por favor inicia sesión con tu contraseña.",
+        },
+        { status: 409 }
+      );
+    }
+    return safeErrorResponse(error, "No se pudo completar el registro. Intenta nuevamente.");
   }
 }

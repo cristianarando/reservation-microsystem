@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, safeErrorResponse } from "@/lib/api-guard";
+import { consumeRateLimit, tooManyRequestsBody } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -155,6 +156,14 @@ export async function GET(req: Request) {
   try {
     const auth = await requireAdmin();
     if (auth.error) return auth.error;
+
+    const rate = consumeRateLimit(`geocode:${auth.user.id}`, 30, 60_000);
+    if (!rate.allowed) {
+      return NextResponse.json(tooManyRequestsBody(rate.retryAfterSec), {
+        status: 429,
+        headers: { "Retry-After": String(rate.retryAfterSec) },
+      });
+    }
 
     const { searchParams } = new URL(req.url);
     const rawQuery = (searchParams.get("q") || "").trim();

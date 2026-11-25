@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  parseJsonObject,
   requireAdmin,
   safeErrorResponse,
   verifySameOrigin,
@@ -23,7 +24,9 @@ export async function PUT(req: Request) {
     const auth = await requireAdmin();
     if (auth.error) return auth.error;
 
-    const body = await req.json().catch(() => ({}));
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const body = parsedBody.data;
 
     let validatedLogoUrl: string | null | undefined = undefined;
     if (body.logoUrl !== undefined) {

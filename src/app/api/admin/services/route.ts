@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  parseJsonObject,
   requireAdmin,
   safeErrorResponse,
   verifySameOrigin,
@@ -19,8 +20,10 @@ export async function POST(req: Request) {
     );
     if (auth.error) return auth.error;
 
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
     const { name, description, durationMin, bufferAfterMin, price, staffIds } =
-      await req.json();
+      parsedBody.data;
 
     const cleanName = String(name || "").trim().slice(0, 120);
     const numDuration = Number(durationMin);
@@ -123,6 +126,8 @@ export async function PUT(req: Request) {
     );
     if (auth.error) return auth.error;
 
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
     const {
       id,
       name,
@@ -132,7 +137,16 @@ export async function PUT(req: Request) {
       price,
       isActive,
       staffIds,
-    } = await req.json();
+    } = parsedBody.data as {
+      id?: string;
+      name?: unknown;
+      description?: unknown;
+      durationMin?: unknown;
+      bufferAfterMin?: unknown;
+      price?: unknown;
+      isActive?: unknown;
+      staffIds?: unknown;
+    };
 
     if (!id) {
       return NextResponse.json({ error: "Falta id de servicio" }, { status: 400 });

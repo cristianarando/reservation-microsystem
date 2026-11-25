@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import type { Appointment } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-import { safeErrorResponse, verifySameOrigin } from "@/lib/api-guard";
+import { parseJsonObject, safeErrorResponse, sanitizeAppointmentForClient, verifySameOrigin } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +39,9 @@ export async function POST(
       return NextResponse.json({ error: "No autenticado" }, { status: 401 });
     }
 
-    const body = await req.json().catch(() => ({}));
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
+    const body = parsedBody.data;
     const expectedStartAt =
       typeof body?.expectedStartAt === "string" ? body.expectedStartAt : undefined;
     const expectedVersion =
@@ -163,7 +165,7 @@ export async function POST(
     return NextResponse.json({
       ok: true,
       idempotent: result.idempotent,
-      appointment: result.appointment,
+      appointment: sanitizeAppointmentForClient(result.appointment, user.role),
     });
   } catch (error: unknown) {
     if (error instanceof AckMoveConflictError) {

@@ -1,9 +1,14 @@
 // src/app/api/appointments/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser, setSessionUserId } from "@/lib/session";
+import { clearImpersonator, getCurrentUser, setSessionUserId } from "@/lib/session";
 import { parseDateAndTime, computeAvailableSlotsForStaff } from "@/lib/slot-engine";
-import { verifySameOrigin, safeErrorResponse } from "@/lib/api-guard";
+import {
+  parseJsonObject,
+  safeErrorResponse,
+  sanitizeAppointmentForClient,
+  verifySameOrigin,
+} from "@/lib/api-guard";
 import { normalizeEmail } from "@/lib/validation/input-validators";
 import { emitRealtimeEvent } from "@/lib/realtime-events";
 import {
@@ -41,7 +46,8 @@ export async function POST(req: Request) {
     const originErr = verifySameOrigin(req);
     if (originErr) return originErr;
 
-    const body = await req.json().catch(() => ({}));
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
     const {
       serviceId,
       staffId,
@@ -52,7 +58,7 @@ export async function POST(req: Request) {
       customerPassword,
       customerPhone,
       customerNotes,
-    } = body;
+    } = parsedBody.data as Record<string, string | undefined>;
 
     let user = await getCurrentUser();
 
@@ -161,7 +167,8 @@ export async function POST(req: Request) {
       }
 
       // Establish secure session
-      await setSessionUserId(user.id);
+      await clearImpersonator();
+      await setSessionUserId(user.id, user.sessionVersion);
     }
 
     // Acceptance Criterion: A professional provider account (PROVIDER) is not a customer.
@@ -534,7 +541,10 @@ export async function POST(req: Request) {
       console.error("[WebPush] Appointment created dispatch error:", err);
     });
 
-    return NextResponse.json({ ok: true, appointment: newAppointment });
+    return NextResponse.json({
+      ok: true,
+      appointment: sanitizeAppointmentForClient(newAppointment, user.role),
+    });
   } catch (error: unknown) {
     if (error instanceof BookingConflictError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

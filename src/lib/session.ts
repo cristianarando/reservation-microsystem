@@ -28,6 +28,9 @@ function sign(payload: string): string {
 }
 
 const VERSION_SEPARATOR = "\0v=";
+const PURPOSE_SEPARATOR = ":";
+
+export type TokenPurpose = "session" | "impersonator" | "oauth_state";
 
 /**
  * Token format: base64url(userId[\0v=version]).expiresAtEpochSec.signature
@@ -44,6 +47,32 @@ export function createSessionToken(
     sessionVersion > 1 ? `${userId}${VERSION_SEPARATOR}${sessionVersion}` : userId;
   const payload = `${Buffer.from(rawIdentity).toString("base64url")}.${expiresAt}`;
   return `${payload}.${sign(payload)}`;
+}
+
+/**
+ * Creates a purpose-scoped HMAC token so cookies cannot be replayed across different flows
+ * (e.g., an old session cookie cannot be substituted as an impersonator or OAuth state cookie).
+ */
+export function createScopedToken(
+  purpose: Exclude<TokenPurpose, "session">,
+  subject: string,
+  maxAgeSec: number,
+  version = 1
+): string {
+  return createSessionToken(`${purpose}${PURPOSE_SEPARATOR}${subject}`, maxAgeSec, version);
+}
+
+export function verifyScopedToken(
+  token: string | undefined | null,
+  expectedPurpose: Exclude<TokenPurpose, "session">
+): { subject: string; version: number } | null {
+  const parsed = verifySessionTokenWithVersion(token);
+  if (!parsed) return null;
+  const prefix = `${expectedPurpose}${PURPOSE_SEPARATOR}`;
+  if (!parsed.userId.startsWith(prefix)) return null;
+  const subject = parsed.userId.slice(prefix.length);
+  if (!subject) return null;
+  return { subject, version: parsed.sessionVersion };
 }
 
 export function verifySessionTokenWithVersion(
@@ -85,7 +114,15 @@ export function verifySessionTokenWithVersion(
 
 export function verifySessionToken(token: string | undefined | null): string | null {
   const parsed = verifySessionTokenWithVersion(token);
-  return parsed ? parsed.userId : null;
+  if (!parsed) return null;
+  // Reject purpose-prefixed tokens (impersonator / oauth_state) if presented as a session cookie
+  if (
+    parsed.userId.startsWith(`impersonator${PURPOSE_SEPARATOR}`) ||
+    parsed.userId.startsWith(`oauth_state${PURPOSE_SEPARATOR}`)
+  ) {
+    return null;
+  }
+  return parsed.userId;
 }
 
 function cookieOptions(maxAge = SESSION_MAX_AGE_SEC) {
@@ -148,16 +185,37 @@ export async function clearSessionUser() {
   }
 }
 
-/** Returns the ADMIN user id that started the current impersonation, if any (signature-verified). */
-export async function getImpersonatorId(): Promise<string | null> {
+/** Returns the ADMIN user id & sessionVersion that started the current impersonation, if any (purpose-verified). */
+export async function getImpersonatorIdentity(): Promise<{
+  userId: string;
+  sessionVersion: number;
+} | null> {
   const cookieStore = await cookies();
-  return verifySessionToken(cookieStore.get(IMPERSONATOR_COOKIE_NAME)?.value);
+  const parsed = verifyScopedToken(
+    cookieStore.get(IMPERSONATOR_COOKIE_NAME)?.value,
+    "impersonator"
+  );
+  if (!parsed) return null;
+  return { userId: parsed.subject, sessionVersion: parsed.version };
 }
 
-export async function setImpersonatorId(adminUserId: string) {
+/** Returns the ADMIN user id that started the current impersonation, if any (purpose-verified). */
+export async function getImpersonatorId(): Promise<string | null> {
+  const ident = await getImpersonatorIdentity();
+  return ident ? ident.userId : null;
+}
+
+export async function setImpersonatorId(
+  adminUserId: string,
+  adminSessionVersion = 1
+) {
   const cookieStore = await cookies();
   const maxAge = 60 * 60 * 8; // impersonation windows expire after 8h
-  cookieStore.set(IMPERSONATOR_COOKIE_NAME, createSessionToken(adminUserId, maxAge), cookieOptions(maxAge));
+  cookieStore.set(
+    IMPERSONATOR_COOKIE_NAME,
+    createScopedToken("impersonator", adminUserId, maxAge, adminSessionVersion),
+    cookieOptions(maxAge)
+  );
 }
 
 export async function clearImpersonator() {
@@ -223,7 +281,7 @@ export async function issueOAuthState(rawReturnTo: string | null): Promise<strin
   const ttlSec = 60 * 10; // 10 minutes
   cookieStore.set(
     OAUTH_STATE_COOKIE_NAME,
-    createSessionToken(nonce, ttlSec),
+    createScopedToken("oauth_state", nonce, ttlSec),
     cookieOptions(ttlSec)
   );
   return encodeURIComponent(JSON.stringify({ returnTo, nonce }));
@@ -239,7 +297,8 @@ export async function verifyAndConsumeOAuthState(
   const rawCookie = cookieStore.get(OAUTH_STATE_COOKIE_NAME)?.value;
   cookieStore.delete(OAUTH_STATE_COOKIE_NAME);
 
-  const expectedNonce = verifySessionToken(rawCookie);
+  const verified = verifyScopedToken(rawCookie, "oauth_state");
+  const expectedNonce = verified?.subject || null;
   let returnTo = "/";
   let receivedNonce: string | null = null;
 

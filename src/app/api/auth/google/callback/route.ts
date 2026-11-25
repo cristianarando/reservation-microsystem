@@ -2,12 +2,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  clearImpersonator,
   getSafeBaseUrl,
   setSessionUserId,
   verifyAndConsumeOAuthState,
 } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+
+function buildRedirectWithError(baseUrl: string, returnTo: string, authError: string): string {
+  const url = new URL(returnTo, baseUrl);
+  url.searchParams.set("authError", authError);
+  return url.toString();
+}
 
 export async function GET(req: Request) {
   const baseUrl = getSafeBaseUrl(req);
@@ -19,21 +26,23 @@ export async function GET(req: Request) {
 
     const { valid: isStateValid, returnTo } = await verifyAndConsumeOAuthState(stateStr);
 
-    if (error) {
-      console.error("Google OAuth error:", error);
+    if (!isStateValid) {
       return NextResponse.redirect(
-        `${baseUrl}${returnTo}?authError=${encodeURIComponent(error)}`
+        buildRedirectWithError(baseUrl, returnTo, "invalid_oauth_state")
       );
     }
 
-    if (!isStateValid) {
+    if (error) {
+      console.error("Google OAuth error:", error);
       return NextResponse.redirect(
-        `${baseUrl}${returnTo}?authError=invalid_oauth_state`
+        buildRedirectWithError(baseUrl, returnTo, error.slice(0, 64))
       );
     }
 
     if (!code) {
-      return NextResponse.redirect(`${baseUrl}${returnTo}?authError=no_code`);
+      return NextResponse.redirect(
+        buildRedirectWithError(baseUrl, returnTo, "no_code")
+      );
     }
 
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -42,7 +51,7 @@ export async function GET(req: Request) {
 
     if (!clientId || !clientSecret) {
       return NextResponse.redirect(
-        `${baseUrl}${returnTo}?authError=missing_google_credentials`
+        buildRedirectWithError(baseUrl, returnTo, "missing_google_credentials")
       );
     }
 
@@ -57,6 +66,7 @@ export async function GET(req: Request) {
         redirect_uri: redirectUri,
         grant_type: "authorization_code",
       }),
+      signal: AbortSignal.timeout(8000),
     });
 
     const tokenData = await tokenResponse.json();
@@ -64,7 +74,7 @@ export async function GET(req: Request) {
     if (!tokenResponse.ok || !tokenData.access_token) {
       console.error("Google token exchange failed:", tokenData);
       return NextResponse.redirect(
-        `${baseUrl}${returnTo}?authError=token_exchange_failed`
+        buildRedirectWithError(baseUrl, returnTo, "token_exchange_failed")
       );
     }
 
@@ -73,8 +83,15 @@ export async function GET(req: Request) {
       "https://www.googleapis.com/oauth2/v3/userinfo",
       {
         headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        signal: AbortSignal.timeout(8000),
       }
     );
+
+    if (!userinfoResponse.ok) {
+      return NextResponse.redirect(
+        buildRedirectWithError(baseUrl, returnTo, "userinfo_fetch_failed")
+      );
+    }
 
     const profile = await userinfoResponse.json();
 
@@ -87,7 +104,7 @@ export async function GET(req: Request) {
       !profile.sub.trim()
     ) {
       return NextResponse.redirect(
-        `${baseUrl}${returnTo}?authError=email_not_verified`
+        buildRedirectWithError(baseUrl, returnTo, "email_not_verified")
       );
     }
 
@@ -108,37 +125,45 @@ export async function GET(req: Request) {
     if (user) {
       if (user.googleId && user.googleId !== googleSub) {
         return NextResponse.redirect(
-          `${baseUrl}${returnTo}?authError=google_account_mismatch`
+          buildRedirectWithError(baseUrl, returnTo, "google_account_mismatch")
         );
       }
 
       const isFirstGoogleLink = !user.googleId;
       const shouldActivatePendingStaff = Boolean(user.pendingStaffUpgrade);
 
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          googleId: googleSub,
-          avatarUrl: profile.picture || user.avatarUrl,
-          name: user.name || profile.name,
-          // If this account previously had only an unverified local password, clear it
-          // and rotate sessionVersion so any pre-registered unverified session is revoked.
-          ...(isFirstGoogleLink
-            ? {
-                passwordHash: null,
-                sessionVersion: { increment: 1 },
-              }
-            : {}),
-          ...(shouldActivatePendingStaff
-            ? {
-                role: user.role === "ADMIN" ? "ADMIN" : "PROVIDER",
-                pendingStaffUpgrade: false,
-                staffInviteTokenHash: null,
-                staffInviteExpiresAt: null,
-                ...(!isFirstGoogleLink ? { sessionVersion: { increment: 1 } } : {}),
-              }
-            : {}),
-        },
+      user = await prisma.$transaction(async (tx) => {
+        const updatedUser = await tx.user.update({
+          where: { id: user!.id },
+          data: {
+            googleId: googleSub,
+            avatarUrl: profile.picture || user!.avatarUrl,
+            name: user!.name || profile.name,
+            ...(isFirstGoogleLink
+              ? {
+                  passwordHash: null,
+                  sessionVersion: { increment: 1 },
+                }
+              : {}),
+            ...(shouldActivatePendingStaff
+              ? {
+                  role: user!.role === "ADMIN" ? "ADMIN" : "PROVIDER",
+                  pendingStaffUpgrade: false,
+                  staffInviteTokenHash: null,
+                  staffInviteExpiresAt: null,
+                  ...(!isFirstGoogleLink ? { sessionVersion: { increment: 1 } } : {}),
+                }
+              : {}),
+          },
+        });
+
+        if (shouldActivatePendingStaff) {
+          await tx.staffProfile.updateMany({
+            where: { userId: updatedUser.id },
+            data: { isActive: true },
+          });
+        }
+        return updatedUser;
       });
     } else {
       user = await prisma.user.create({
@@ -154,6 +179,7 @@ export async function GET(req: Request) {
     }
 
     // 4. Issue signed session cookie with current sessionVersion
+    await clearImpersonator();
     await setSessionUserId(user.id, user.sessionVersion);
 
     // 5. Redirect based on role
@@ -161,9 +187,11 @@ export async function GET(req: Request) {
       return NextResponse.redirect(`${baseUrl}/admin`);
     }
 
-    return NextResponse.redirect(`${baseUrl}${returnTo}`);
+    return NextResponse.redirect(new URL(returnTo, baseUrl).toString());
   } catch (error: unknown) {
     console.error("Google callback error:", error);
-    return NextResponse.redirect(`${baseUrl}/?authError=oauth_callback_failed`);
+    return NextResponse.redirect(
+      buildRedirectWithError(baseUrl, "/", "oauth_callback_failed")
+    );
   }
 }

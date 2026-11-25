@@ -1,13 +1,18 @@
 // src/app/api/admin/shifts/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/session";
 import {
   validateAllShifts,
   sanitizeAndSortShifts,
   ShiftItem,
 } from "@/lib/validation/acceptance-criteria";
-import { safeErrorResponse, verifySameOrigin } from "@/lib/api-guard";
+import {
+  parseJsonObject,
+  requireStaffOrAdmin,
+  safeErrorResponse,
+  verifyProviderOwnsStaff,
+  verifySameOrigin,
+} from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -16,39 +21,35 @@ export async function PUT(req: Request) {
     const originErr = verifySameOrigin(req);
     if (originErr) return originErr;
 
-    const user = await getCurrentUser();
-    if (!user || (user.role !== "ADMIN" && user.role !== "PROVIDER")) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-    }
+    const auth = await requireStaffOrAdmin();
+    if (auth.error) return auth.error;
+    const { user } = auth;
 
-    const body = await req.json().catch(() => ({}));
+    const parsedBody = await parseJsonObject(req);
+    if (parsedBody.error) return parsedBody.error;
     const {
       staffId,
       shifts,
       customHorizonDays,
       customLeadTimeMin,
       isActive,
-    } = body;
+    } = parsedBody.data as {
+      staffId?: string;
+      shifts?: unknown;
+      customHorizonDays?: unknown;
+      customLeadTimeMin?: unknown;
+      isActive?: unknown;
+    };
 
-    if (!staffId) {
+    if (!staffId || typeof staffId !== "string") {
       return NextResponse.json(
         { error: "Falta el parámetro obligatorio staffId" },
         { status: 400 }
       );
     }
 
-    // Role check: PROVIDER can only edit their own schedule
-    if (user.role === "PROVIDER") {
-      const ownStaff = await prisma.staffProfile.findFirst({
-        where: { userId: user.id },
-      });
-      if (!ownStaff || ownStaff.id !== staffId) {
-        return NextResponse.json(
-          { error: "Solo tienes permisos para modificar tus propios horarios." },
-          { status: 403 }
-        );
-      }
-    }
+    const ownershipErr = await verifyProviderOwnsStaff(user, staffId);
+    if (ownershipErr) return ownershipErr;
 
     // Validate boundaries for horizon and lead time
     if (customHorizonDays !== undefined) {
