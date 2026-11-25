@@ -23,8 +23,8 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          role="status"
-          aria-live="polite"
+          role={toast.type === "error" ? "alert" : "status"}
+          aria-live={toast.type === "error" ? "assertive" : "polite"}
           className={`pointer-events-auto rounded-2xl p-3.5 shadow-xl border backdrop-blur-md flex items-start gap-3 transition-all animate-in slide-in-from-top-3 fade-in duration-200 ${
             toast.type === "success"
               ? "bg-white/95 border-emerald-300 text-zinc-900 shadow-emerald-500/10"
@@ -66,7 +66,7 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
           <button
             type="button"
             onClick={() => onDismiss(toast.id)}
-            className="text-zinc-400 hover:text-zinc-700 p-0.5 rounded-lg transition-colors shrink-0"
+            className="text-zinc-500 hover:text-zinc-800 p-1 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 shrink-0"
             title="Cerrar notificación"
             aria-label="Cerrar notificación"
           >

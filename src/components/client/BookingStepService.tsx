@@ -23,7 +23,7 @@ export function BookingStepService({
         <h2 className="text-lg md:text-2xl font-bold text-[#1F1F23]">
           ¿Qué servicio necesitas hoy?
         </h2>
-        <p className="text-xs md:text-sm text-zinc-500 mt-0.5">
+        <p className="text-xs md:text-sm text-zinc-600 mt-0.5">
           Selecciona un servicio para ver profesionales y horarios
         </p>
       </div>
@@ -43,13 +43,19 @@ export function BookingStepService({
           return (
             <button
               key={svc.id}
+              type="button"
               onClick={() => onSelectService(svc)}
-              className="w-full text-left bg-[#27272A] hover:bg-[#1F1F23] text-white rounded-2xl md:rounded-3xl p-3.5 pl-4 sm:pl-5 pr-3.5 md:p-5 flex items-center justify-between gap-3 transition-all shadow-sm hover:shadow-md active:scale-[0.99] group border border-transparent hover:border-zinc-700"
+              className="w-full text-left bg-[#27272A] hover:bg-[var(--brand-primary,#1F1F23)] text-white rounded-2xl md:rounded-3xl p-3.5 pl-4 sm:pl-5 pr-3.5 md:p-5 flex items-center justify-between gap-3 transition-all shadow-sm hover:shadow-md active:scale-[0.99] group border border-transparent hover:border-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/40"
             >
               <div className="min-w-0 flex-1">
                 <div className="font-bold text-sm md:text-base leading-tight text-white group-hover:text-emerald-300 transition-colors break-words">
                   {svc.name}
                 </div>
+                {svc.description && (
+                  <p className="text-xs text-zinc-300 mt-1 line-clamp-2 leading-snug">
+                    {svc.description}
+                  </p>
+                )}
                 <div className="text-xs text-zinc-300 mt-1 flex items-center gap-2 flex-wrap">
                   <span className="whitespace-nowrap">⏱️ {svc.durationMin} min</span>
                   {doctorsForSvc.length === 1 ? (

@@ -242,14 +242,21 @@ export function AdminHeader({
       )}
 
       <div className="p-3 bg-zinc-50 border-b border-zinc-200 overflow-x-auto no-scrollbar pill-slider">
-        <div className="bg-zinc-200 p-1 rounded-full flex gap-1 min-w-max border border-zinc-300">
+        <div
+          role="tablist"
+          aria-label="Secciones de administración"
+          className="bg-zinc-200 p-1 rounded-full flex gap-1 min-w-max border border-zinc-300"
+        >
           {visibleTabs.map((tab) => (
             <button
               key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
               onClick={() => onSelectTab(tab.id)}
-              className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${
+              className={`min-h-[44px] sm:min-h-[36px] px-4 py-2 rounded-full text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 ${
                 activeTab === tab.id
-                  ? "bg-[#1F1F23] text-white shadow-sm"
+                  ? "bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] shadow-sm"
                   : "text-[#1F1F23] hover:bg-zinc-300/70"
               }`}
             >

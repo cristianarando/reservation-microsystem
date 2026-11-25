@@ -234,7 +234,7 @@ export function AdminAgendaTab({
             <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
             Acciones Rápidas de Imprevisto
           </span>
-          <span className="text-[10px] text-zinc-400">
+          <span className="text-[10px] text-zinc-600 font-medium">
             {isClosedDay ? closedTag : "1-Toque"}
           </span>
         </div>
@@ -832,10 +832,14 @@ export function AdminAgendaTab({
                     }`}
                   >
                     {isCompleted
-                      ? "✓ ATENDIDA"
+                      ? "✓ Atendida"
                       : isNoShow
-                      ? "⚠️ NO ASISTIÓ"
-                      : apt.status}
+                      ? "⚠️ Inasistencia"
+                      : isCancelled
+                      ? "✕ Cancelada"
+                      : apt.status === "RESCHEDULED_BY_STAFF"
+                      ? "🕒 Reprogramada"
+                      : "Confirmada"}
                   </span>
                 </div>
 

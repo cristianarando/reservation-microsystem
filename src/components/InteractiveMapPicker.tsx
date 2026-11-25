@@ -423,9 +423,10 @@ export default function InteractiveMapPicker({
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="flex-1 flex items-center gap-1.5">
           <div className="relative flex-1 min-w-0">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
             <input
               type="text"
+              aria-label="Buscar dirección o avenida en el mapa"
               placeholder="Buscar calle o avenida (ej. Av. América, Cochabamba)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -526,9 +527,10 @@ export default function InteractiveMapPicker({
       {/* Row 2: Direct Google Maps Link Importer */}
       <div className="flex flex-col sm:flex-row gap-1.5 bg-zinc-50 border border-zinc-200 rounded-xl p-1.5">
         <div className="relative flex-1 min-w-0">
-          <Link2 className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <Link2 className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
           <input
             type="url"
+            aria-label="Pegar enlace de Google Maps"
             placeholder="O pega tu enlace de Google Maps (https://maps.app.goo.gl/... o google.com/maps/...)"
             value={mapLinkInput}
             onChange={(e) => setMapLinkInput(e.target.value)}

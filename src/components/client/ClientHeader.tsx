@@ -1,8 +1,9 @@
 "use client";
 
 import React from "react";
-import { Bell, BellOff, MapPin, User } from "lucide-react";
+import { MapPin, User } from "lucide-react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
+import { PushNotificationToggle } from "@/components/ui/PushNotificationToggle";
 import { DEFAULT_BUSINESS_LOGO } from "@/lib/avatars";
 import type { DevicePushState } from "@/lib/push-client";
 import type { PortalBusinessSettings, PortalUser } from "@/types/portal";
@@ -18,6 +19,7 @@ interface ClientHeaderProps {
   pushBusy: boolean;
   testingPush: boolean;
   pushMessage: string | null;
+  compact?: boolean;
   onDismissPushMessage: () => void;
   onOpenMapModal: () => void;
   onOpenPwaModal: () => void;
@@ -39,6 +41,7 @@ export function ClientHeader({
   pushBusy,
   testingPush,
   pushMessage,
+  compact = false,
   onDismissPushMessage,
   onOpenMapModal,
   onOpenPwaModal,
@@ -48,22 +51,16 @@ export function ClientHeader({
   onSelectBookTab,
   onSelectMyAppointmentsTab,
 }: ClientHeaderProps) {
-  const pushLabel = pushBusy
-    ? "Activando..."
-    : pushState === "subscribed"
-    ? "Avisos activos"
-    : pushState === "insecure_context"
-    ? "Avisos (Requiere HTTPS)"
-    : pushState === "denied"
-    ? "Avisos bloqueados"
-    : "Activar avisos";
-
   return (
-    <header className="px-4 sm:px-5 pt-4 sm:pt-5 pb-3.5 md:px-8 md:pt-7 md:pb-5 bg-white border-b border-zinc-100">
+    <header
+      className={`px-4 sm:px-5 md:px-8 bg-white border-b border-zinc-100 ${
+        compact ? "pt-3 pb-2.5 md:pt-4 md:pb-3" : "pt-4 sm:pt-5 pb-3.5 md:pt-7 md:pb-5"
+      }`}
+    >
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-start sm:items-center justify-between gap-2.5 flex-1 min-w-0">
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="w-11 h-11 md:w-14 md:h-14 rounded-full overflow-hidden bg-zinc-200 flex-shrink-0 border border-zinc-300">
+            <div className="w-11 h-11 md:w-12 md:h-12 rounded-full overflow-hidden bg-zinc-200 flex-shrink-0 border border-zinc-300">
               {/* eslint-disable-next-line @next/next/no-img-element -- Dynamic business logo or uploaded data URL */}
               <img
                 src={settings?.logoUrl || DEFAULT_BUSINESS_LOGO}
@@ -75,67 +72,41 @@ export function ClientHeader({
               <h1 className="font-bold text-base sm:text-lg md:text-xl leading-tight text-[#1F1F23] break-words">
                 {settings?.name || "Mi Negocio"}
               </h1>
-              <p className="hidden sm:block text-xs md:text-sm text-zinc-600 leading-snug mt-0.5">
-                {settings?.addressText || "Av. Principal 123, Bolivia"}
-              </p>
-              <div className="hidden sm:flex mt-1.5 items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={onOpenMapModal}
-                  className="inline-flex items-center gap-1 text-[11px] md:text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-full transition-all border border-rose-200/80 shadow-2xs whitespace-nowrap"
-                >
-                  <MapPin className="w-3 h-3 text-rose-600 shrink-0" />
-                  <span>Ver mapa en la web</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenPwaModal}
-                  className="inline-flex items-center gap-1 text-[11px] md:text-xs font-semibold text-zinc-800 bg-zinc-100 hover:bg-zinc-200 px-2.5 py-1 rounded-full transition-all border border-zinc-300 shadow-2xs whitespace-nowrap"
-                  title="Instalar como aplicación en tu celular"
-                >
-                  <span>📲</span>
-                  <span>{pwaInstalled ? "App Instalada ✓" : "Instalar App"}</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={pushBusy}
-                  onClick={onTogglePush}
-                  data-testid="header-client-push-btn"
-                  className={`inline-flex items-center gap-1 text-[11px] md:text-xs font-semibold px-2.5 py-1 rounded-full transition-all border shadow-2xs whitespace-nowrap ${
-                    pushState === "subscribed"
-                      ? "text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-300"
-                      : pushState === "insecure_context" || pushState === "denied"
-                      ? "text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-300"
-                      : "text-zinc-800 bg-zinc-100 hover:bg-zinc-200 border-zinc-300"
-                  } disabled:opacity-50`}
-                  title={
-                    pushState === "subscribed"
-                      ? "Notificaciones activas en este dispositivo (clic para desactivar)"
-                      : pushState === "insecure_context"
-                      ? "Las notificaciones requieren HTTPS"
-                      : "Recibe alertas en tu navegador si cambia tu cita"
-                  }
-                >
-                  {pushState === "subscribed" ? (
-                    <Bell className="w-3 h-3 text-emerald-600 shrink-0" />
-                  ) : (
-                    <BellOff className="w-3 h-3 text-zinc-500 shrink-0" />
-                  )}
-                  <span>{pushLabel}</span>
-                </button>
-                {pushState === "subscribed" && currentUser && (
-                  <button
-                    type="button"
-                    disabled={testingPush}
-                    onClick={onTestPush}
-                    data-testid="header-client-push-test-btn"
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs whitespace-nowrap disabled:opacity-50"
-                    title="Probar entrega real Web Push desde el servidor"
-                  >
-                    <span>{testingPush ? "Probando..." : "Probar"}</span>
-                  </button>
-                )}
-              </div>
+              {!compact && (
+                <>
+                  <p className="hidden sm:block text-xs md:text-sm text-zinc-600 leading-snug mt-0.5">
+                    {settings?.addressText || "Av. Principal 123, Bolivia"}
+                  </p>
+                  <div className="hidden sm:flex mt-1.5 items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={onOpenMapModal}
+                      className="inline-flex items-center gap-1 text-[11px] md:text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 min-h-[34px] rounded-full transition-all border border-rose-200/80 shadow-2xs whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/30"
+                    >
+                      <MapPin className="w-3 h-3 text-rose-600 shrink-0" />
+                      <span>Ver mapa en la web</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onOpenPwaModal}
+                      className="inline-flex items-center gap-1 text-[11px] md:text-xs font-semibold text-zinc-800 bg-zinc-100 hover:bg-zinc-200 px-2.5 py-1 min-h-[34px] rounded-full transition-all border border-zinc-300 shadow-2xs whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
+                      title="Instalar como aplicación en tu celular"
+                    >
+                      <span>📲</span>
+                      <span>{pwaInstalled ? "App Instalada ✓" : "Instalar App"}</span>
+                    </button>
+                    <PushNotificationToggle
+                      pushState={pushState}
+                      pushLoading={pushBusy}
+                      pushTestLoading={testingPush}
+                      toggleTestId="header-client-push-btn"
+                      testBtnTestId="header-client-push-test-btn"
+                      onToggle={onTogglePush}
+                      onSendTest={currentUser ? onTestPush : undefined}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -143,14 +114,14 @@ export function ClientHeader({
             <button
               type="button"
               onClick={onOpenAuthModal}
-              className={`h-9 sm:h-10 md:h-11 px-3 sm:px-3.5 md:px-4 rounded-full text-xs md:text-sm font-semibold flex items-center gap-1.5 transition-all shadow-sm whitespace-nowrap ${
+              className={`min-h-[44px] sm:min-h-[40px] md:min-h-[44px] px-3 sm:px-3.5 md:px-4 rounded-full text-xs md:text-sm font-semibold flex items-center gap-1.5 transition-all shadow-sm whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 ${
                 currentUser
-                  ? "bg-[#1F1F23] text-white hover:bg-black"
+                  ? "bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] hover:opacity-90"
                   : "bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-300"
               }`}
               title={currentUser ? "Mi Cuenta" : "Iniciar Sesión"}
             >
-              <User className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+              <User className="w-3.5 h-3.5 shrink-0 opacity-80" />
               <span className="max-w-[82px] sm:max-w-[110px] truncate">
                 {currentUser ? currentUser.name?.split(" ")[0] : "Ingresar"}
               </span>
@@ -159,8 +130,9 @@ export function ClientHeader({
             <button
               type="button"
               onClick={onOpenMapModal}
-              className="hidden sm:flex w-10 h-10 md:w-11 md:h-11 rounded-full bg-[#1F1F23] text-white items-center justify-center hover:bg-black transition-all shadow-sm"
+              className="hidden sm:flex w-11 h-11 rounded-full bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] items-center justify-center hover:opacity-90 transition-all shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
               title="Ver Ubicación en Mapa"
+              aria-label="Ver Ubicación en Mapa"
             >
               <MapPin className="w-4 h-4 text-rose-400" />
             </button>
@@ -169,8 +141,9 @@ export function ClientHeader({
                 href={`https://wa.me/${settings.phoneWhatsapp.replace(/\D/g, "")}`}
                 target="_blank"
                 rel="noreferrer"
-                className="w-9 h-9 sm:w-10 sm:h-10 md:w-11 md:h-11 rounded-full bg-[#25D366] text-white flex items-center justify-center hover:bg-[#1EBE5D] transition-all shadow-sm shrink-0"
+                className="w-11 h-11 rounded-full bg-[#25D366] text-white flex items-center justify-center hover:bg-[#1EBE5D] transition-all shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700/40 shrink-0"
                 title="Abrir WhatsApp"
+                aria-label="Abrir WhatsApp"
               >
                 <WhatsAppIcon className="w-5 h-5" />
               </a>
@@ -178,89 +151,70 @@ export function ClientHeader({
           </div>
         </div>
 
-        <div className="sm:hidden space-y-2">
-          <p className="text-xs text-zinc-600 leading-snug">
-            {settings?.addressText || "Dirección por configurar"}
-          </p>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={onOpenMapModal}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 min-h-[34px] rounded-full transition-all border border-rose-200/80 shadow-2xs whitespace-nowrap"
-            >
-              <MapPin className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-              <span>Ver mapa en la web</span>
-            </button>
-            <button
-              type="button"
-              onClick={onOpenPwaModal}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-800 bg-zinc-100 hover:bg-zinc-200 px-3 py-1.5 min-h-[34px] rounded-full transition-all border border-zinc-300 shadow-2xs whitespace-nowrap"
-              title="Instalar como aplicación en tu celular"
-            >
-              <span>📲</span>
-              <span>{pwaInstalled ? "App Instalada ✓" : "Instalar App"}</span>
-            </button>
-            <button
-              type="button"
-              disabled={pushBusy}
-              onClick={onTogglePush}
-              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 min-h-[34px] rounded-full transition-all border shadow-2xs whitespace-nowrap ${
-                pushState === "subscribed"
-                  ? "text-emerald-800 bg-emerald-50 border-emerald-300"
-                  : pushState === "insecure_context" || pushState === "denied"
-                  ? "text-amber-800 bg-amber-50 border-amber-300"
-                  : "text-zinc-800 bg-zinc-100 border-zinc-300"
-              } disabled:opacity-50`}
-            >
-              {pushState === "subscribed" ? (
-                <Bell className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              ) : (
-                <BellOff className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-              )}
-              <span>
-                {pushBusy
-                  ? "Activando..."
-                  : pushState === "subscribed"
-                  ? "Avisos activos"
-                  : pushState === "insecure_context"
-                  ? "Requiere HTTPS"
-                  : "Activar avisos"}
-              </span>
-            </button>
-            {pushState === "subscribed" && currentUser && (
+        {!compact && (
+          <div className="sm:hidden space-y-2">
+            <p className="text-xs text-zinc-600 leading-snug">
+              {settings?.addressText || "Dirección por configurar"}
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
-                disabled={testingPush}
-                onClick={onTestPush}
-                className="inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 min-h-[34px] rounded-full bg-white text-emerald-800 border border-emerald-200 shadow-2xs whitespace-nowrap disabled:opacity-50"
+                onClick={onOpenMapModal}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 min-h-[44px] rounded-full transition-all border border-rose-200/80 shadow-2xs whitespace-nowrap"
               >
-                <span>{testingPush ? "Probando..." : "Probar"}</span>
+                <MapPin className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                <span>Ver mapa en la web</span>
               </button>
-            )}
+              <button
+                type="button"
+                onClick={onOpenPwaModal}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-800 bg-zinc-100 hover:bg-zinc-200 px-3 py-1.5 min-h-[44px] rounded-full transition-all border border-zinc-300 shadow-2xs whitespace-nowrap"
+                title="Instalar como aplicación en tu celular"
+              >
+                <span>📲</span>
+                <span>{pwaInstalled ? "App Instalada ✓" : "Instalar App"}</span>
+              </button>
+              <PushNotificationToggle
+                pushState={pushState}
+                pushLoading={pushBusy}
+                pushTestLoading={testingPush}
+                onToggle={onTogglePush}
+                onSendTest={currentUser ? onTestPush : undefined}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {pushMessage && (
+      {pushMessage && !compact && (
         <div className="mt-3 p-3 rounded-2xl bg-zinc-50 border border-zinc-200 text-xs text-zinc-800 flex items-center justify-between gap-2">
           <span className="leading-snug">{pushMessage}</span>
           <button
             type="button"
             onClick={onDismissPushMessage}
-            className="text-zinc-400 hover:text-zinc-700 font-bold shrink-0 px-1"
+            aria-label="Descartar aviso"
+            className="text-zinc-500 hover:text-zinc-800 font-bold shrink-0 px-2 py-1"
           >
             ✕
           </button>
         </div>
       )}
 
-      <div className="mt-4 md:mt-6 bg-zinc-200 p-1 rounded-full flex items-center border border-zinc-300/60 max-w-md mx-auto">
+      <div
+        role="tablist"
+        aria-label="Navegación principal"
+        className={`${
+          compact ? "mt-2.5" : "mt-4 md:mt-6"
+        } bg-zinc-200 p-1 rounded-full flex items-center border border-zinc-300/60 max-w-md mx-auto`}
+      >
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === "book"}
           onClick={onSelectBookTab}
-          className={`flex-1 py-2.5 text-xs font-bold rounded-full transition-all text-center ${
+          className={`flex-1 min-h-[44px] sm:min-h-[38px] py-2 text-xs font-bold rounded-full transition-all text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 ${
             activeTab === "book"
-              ? "bg-[#1F1F23] text-white shadow-sm"
+              ? "bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] shadow-sm"
               : "text-zinc-800 hover:text-black"
           }`}
         >
@@ -268,10 +222,12 @@ export function ClientHeader({
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === "my-appointments"}
           onClick={onSelectMyAppointmentsTab}
-          className={`flex-1 py-2.5 text-xs font-bold rounded-full transition-all text-center flex items-center justify-center gap-1.5 ${
+          className={`flex-1 min-h-[44px] sm:min-h-[38px] py-2 text-xs font-bold rounded-full transition-all text-center flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 ${
             activeTab === "my-appointments"
-              ? "bg-[#1F1F23] text-white shadow-sm"
+              ? "bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] shadow-sm"
               : "text-zinc-800 hover:text-black"
           }`}
         >

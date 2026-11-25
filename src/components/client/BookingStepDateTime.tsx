@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useId } from "react";
 import { ArrowRight } from "lucide-react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
@@ -115,6 +115,8 @@ export function BookingStepDateTime({
   onSelectTime,
   onContinue,
 }: BookingStepDateTimeProps) {
+  const dateGroupId = useId();
+  const slotsGroupId = useId();
   const businessTz = resolveBusinessTimeZone(settings?.timezone);
   const referenceNow = referenceNowIso ? new Date(referenceNowIso) : new Date();
   const calendarTargetStaff =
@@ -157,9 +159,12 @@ export function BookingStepDateTime({
         <div className="md:grid md:grid-cols-12 md:gap-8 items-start">
           <div className="md:col-span-5">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider">
+              <span
+                id={dateGroupId}
+                className="text-xs font-bold text-zinc-700 uppercase tracking-wider"
+              >
                 Selecciona el día
-              </label>
+              </span>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -169,7 +174,7 @@ export function BookingStepDateTime({
                     );
                     if (idx > 0) onSelectDate(dateOptions[idx - 1].dateStr);
                   }}
-                  className="w-9 h-9 rounded-full bg-zinc-200 hover:bg-zinc-300 text-zinc-800 flex items-center justify-center text-sm font-bold transition-all active:scale-95"
+                  className="w-11 h-11 sm:w-9 sm:h-9 rounded-full bg-zinc-200 hover:bg-zinc-300 text-zinc-800 flex items-center justify-center text-sm font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 active:scale-95"
                   title="Día anterior"
                   aria-label="Día anterior"
                 >
@@ -185,7 +190,7 @@ export function BookingStepDateTime({
                       onSelectDate(dateOptions[idx + 1].dateStr);
                     }
                   }}
-                  className="w-9 h-9 rounded-full bg-zinc-200 hover:bg-zinc-300 text-zinc-800 flex items-center justify-center text-sm font-bold transition-all active:scale-95"
+                  className="w-11 h-11 sm:w-9 sm:h-9 rounded-full bg-zinc-200 hover:bg-zinc-300 text-zinc-800 flex items-center justify-center text-sm font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 active:scale-95"
                   title="Día siguiente"
                   aria-label="Día siguiente"
                 >
@@ -194,7 +199,11 @@ export function BookingStepDateTime({
               </div>
             </div>
 
-            <div className="overflow-x-auto no-scrollbar pill-slider flex items-stretch md:grid md:grid-cols-3 gap-2.5 py-2 px-1.5 -mx-1">
+            <div
+              role="group"
+              aria-labelledby={dateGroupId}
+              className="overflow-x-auto no-scrollbar pill-slider flex items-stretch md:grid md:grid-cols-3 gap-2.5 py-2 px-1.5 -mx-1"
+            >
               {dateOptions.map((item) => {
                 const isSelected = selectedDateStr === item.dateStr;
                 const matchingFullBlocks =
@@ -232,10 +241,12 @@ export function BookingStepDateTime({
                 return (
                   <button
                     key={item.dateStr}
+                    type="button"
+                    aria-pressed={isSelected}
                     onClick={() => onSelectDate(item.dateStr)}
-                    className={`flex-shrink-0 min-w-[84px] md:min-w-0 py-2.5 px-3 rounded-2xl flex flex-col items-center justify-center transition-colors duration-100 ${
+                    className={`flex-shrink-0 min-w-[84px] md:min-w-0 min-h-[60px] py-2.5 px-3 rounded-2xl flex flex-col items-center justify-center transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 ${
                       isSelected
-                        ? "bg-[#1F1F23] text-white shadow-md ring-2 ring-[#1F1F23]/25 font-bold"
+                        ? "bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] shadow-md ring-2 ring-[#1F1F23]/25 font-bold"
                         : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300 font-semibold"
                     }`}
                   >
@@ -279,13 +290,16 @@ export function BookingStepDateTime({
           <div className="md:col-span-7 mt-5 md:mt-0">
             <div className="flex items-start sm:items-center justify-between gap-3 mb-2.5">
               <div className="min-w-0">
-                <label className="text-xs font-bold text-zinc-700 uppercase tracking-wider flex items-center gap-1.5 flex-wrap">
+                <span
+                  id={slotsGroupId}
+                  className="text-xs font-bold text-zinc-700 uppercase tracking-wider flex items-center gap-1.5 flex-wrap"
+                >
                   <span>Horarios disponibles</span>
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 whitespace-nowrap">
                     En vivo
                   </span>
-                </label>
-                <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                </span>
+                <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug">
                   Solo se muestran turnos disponibles. Los horarios ocupados o con imprevistos quedan ocultos.
                 </p>
               </div>
@@ -407,16 +421,22 @@ export function BookingStepDateTime({
                     })}
                   </div>
                 )}
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                <div
+                  role="group"
+                  aria-labelledby={slotsGroupId}
+                  className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-3 lg:grid-cols-4 gap-2.5"
+                >
                   {availableSlots.map((slot) => {
                     const isSelected = selectedTime === slot;
                     return (
                       <button
                         key={slot}
+                        type="button"
+                        aria-pressed={isSelected}
                         onClick={() => onSelectTime(slot)}
-                        className={`min-h-[44px] py-3 rounded-xl md:rounded-2xl text-xs font-bold transition-all ${
+                        className={`min-h-[44px] py-3 rounded-xl md:rounded-2xl text-xs font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 ${
                           isSelected
-                            ? "bg-[#1F1F23] text-white shadow-md scale-[1.03]"
+                            ? "bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] shadow-md scale-[1.03]"
                             : "bg-zinc-200 text-zinc-900 hover:bg-zinc-300"
                         }`}
                       >
@@ -433,13 +453,14 @@ export function BookingStepDateTime({
 
       <div className="mt-8 pt-4 border-t border-zinc-100 flex justify-end">
         <button
+          type="button"
           onClick={onContinue}
           disabled={
             !selectedTime ||
             !availableSlots.includes(selectedTime) ||
             availableSlots.length === 0
           }
-          className="w-full md:w-auto md:min-w-[280px] rounded-full bg-[#1F1F23] text-white h-14 font-semibold text-sm shadow-lg flex items-center justify-center gap-2 hover:bg-black transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+          className="w-full md:w-auto md:min-w-[280px] rounded-full bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] h-14 font-semibold text-sm shadow-lg flex items-center justify-center gap-2 hover:opacity-90 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
         >
           <span>Continuar al Resumen</span>
           <ArrowRight className="w-4 h-4" />

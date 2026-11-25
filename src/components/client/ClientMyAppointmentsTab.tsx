@@ -1,8 +1,9 @@
 "use client";
 
 import React from "react";
-import { Bell, BellOff, Calendar, Clock, FileText, User } from "lucide-react";
+import { Calendar, Clock, FileText, User } from "lucide-react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
+import { PushNotificationToggle } from "@/components/ui/PushNotificationToggle";
 import {
   isPastUntickedAppointment,
   isUpcomingActiveAppointment,
@@ -208,53 +209,20 @@ export function ClientMyAppointmentsTab({
         <h2 className="text-base font-bold text-[#1F1F23]">
           Tus Reservas Activas ({activeApts.length})
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {currentUser && (
-            <button
-              type="button"
-              disabled={pushBusy}
-              onClick={onTogglePush}
-              data-testid="my-appointments-push-btn"
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold border transition-all ${
-                pushState === "subscribed"
-                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                  : pushState === "insecure_context" || pushState === "denied"
-                  ? "bg-amber-50 border-amber-200 text-amber-800"
-                  : "bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200"
-              } disabled:opacity-50`}
-            >
-              {pushState === "subscribed" ? (
-                <>
-                  <Bell className="w-3 h-3 text-emerald-600" />
-                  <span>Avisos activos</span>
-                </>
-              ) : (
-                <>
-                  <BellOff className="w-3 h-3 text-zinc-500" />
-                  <span>
-                    {pushState === "insecure_context"
-                      ? "Avisos (Requiere HTTPS)"
-                      : pushState === "denied"
-                      ? "Avisos bloqueados"
-                      : "Avísame si cambia mi cita"}
-                  </span>
-                </>
-              )}
-            </button>
+            <PushNotificationToggle
+              pushState={pushState}
+              pushLoading={pushBusy}
+              pushTestLoading={testingPush}
+              idleLabel="Avísame si cambia mi cita"
+              toggleTestId="my-appointments-push-btn"
+              testBtnTestId="my-appointments-push-test-btn"
+              onToggle={onTogglePush}
+              onSendTest={onTestPush}
+            />
           )}
-          {currentUser && pushState === "subscribed" && (
-            <button
-              type="button"
-              disabled={testingPush}
-              onClick={onTestPush}
-              data-testid="my-appointments-push-test-btn"
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
-              title="Probar entrega real Web Push desde el servidor"
-            >
-              <span>{testingPush ? "Probando..." : "Probar"}</span>
-            </button>
-          )}
-          <span className="text-xs text-zinc-400">
+          <span className="text-xs text-zinc-600 font-medium">
             Máx. {maxActiveAllowed} activas
           </span>
         </div>
@@ -404,7 +372,7 @@ export function ClientMyAppointmentsTab({
                                 : "Cancelar cita"}
                             </button>
                           ) : (
-                            <span className="text-xs text-zinc-400">
+                            <span className="text-xs text-zinc-600">
                               No cancelable ({settings?.minCancelNoticeHours}h mín.)
                             </span>
                           )}

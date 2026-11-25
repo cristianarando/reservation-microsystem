@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useId } from "react";
 import { AdminApp } from "@/components/AdminApp";
+import { GoogleAuthButton } from "@/components/ui/GoogleAuthButton";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -35,6 +36,8 @@ export function AdminPortalClient({
   initialInviteToken = "",
   initialEmail = "",
 }: AdminPortalClientProps) {
+  const staffEmailInputId = useId();
+  const staffPasswordInputId = useId();
   const [data, setData] = useState<BootstrapPayload | null>(initialData);
   const [loading, setLoading] = useState<boolean>(!initialData);
   const [emailInput, setEmailInput] = useState(initialEmail);
@@ -204,34 +207,15 @@ export function AdminPortalClient({
           )}
 
           {/* Google Sign-In for Staff */}
-          <a
+          <GoogleAuthButton
             href="/api/auth/google?returnTo=/admin"
-            className="w-full py-3 px-4 rounded-full bg-white hover:bg-zinc-50 text-zinc-800 text-xs font-bold border border-zinc-300 shadow-sm flex items-center justify-center gap-2.5 transition-all"
-          >
-            <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-              />
-            </svg>
-            <span>Iniciar Sesión con Google (Staff)</span>
-          </a>
+            label="Iniciar Sesión con Google (Staff)"
+            className="rounded-full text-xs shadow-sm"
+          />
 
           <div className="flex items-center gap-2">
             <div className="flex-1 h-px bg-zinc-200" />
-            <span className="text-[10px] text-zinc-400 font-semibold uppercase">
+            <span className="text-[10px] text-zinc-500 font-semibold uppercase">
               O con credenciales del sistema
             </span>
             <div className="flex-1 h-px bg-zinc-200" />
@@ -259,11 +243,15 @@ export function AdminPortalClient({
               </div>
             )}
 
-            <div className="border border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2.5">
-              <label className="text-xs text-zinc-500 block font-medium">
+            <div className="border border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-zinc-900/20">
+              <label
+                htmlFor={staffEmailInputId}
+                className="text-xs text-zinc-600 block font-medium"
+              >
                 Correo Electrónico Autorizado
               </label>
               <input
+                id={staffEmailInputId}
                 type="email"
                 required
                 value={emailInput}
@@ -273,14 +261,18 @@ export function AdminPortalClient({
               />
             </div>
 
-            <div className="border border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2.5 relative">
-              <label className="text-xs text-zinc-500 block font-medium">
+            <div className="border border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2.5 relative focus-within:ring-2 focus-within:ring-zinc-900/20">
+              <label
+                htmlFor={staffPasswordInputId}
+                className="text-xs text-zinc-600 block font-medium"
+              >
                 {inviteTokenInput
                   ? "Define tu Nueva Contraseña"
                   : "Contraseña Privada"}
               </label>
               <div className="flex items-center justify-between">
                 <input
+                  id={staffPasswordInputId}
                   type={showPassword ? "text" : "password"}
                   required
                   value={passwordInput}
@@ -294,7 +286,7 @@ export function AdminPortalClient({
                   aria-label={
                     showPassword ? "Ocultar contraseña" : "Mostrar contraseña"
                   }
-                  className="text-zinc-400 hover:text-zinc-700 w-9 h-9 -mr-1 flex items-center justify-center shrink-0"
+                  className="text-zinc-500 hover:text-zinc-800 w-10 h-10 -mr-1 flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 shrink-0"
                 >
                   {showPassword ? (
                     <EyeOff className="w-4 h-4" />
@@ -308,7 +300,7 @@ export function AdminPortalClient({
             <button
               type="submit"
               disabled={loginLoading || !emailInput || !passwordInput}
-              className="w-full py-3.5 rounded-full bg-[#1F1F23] text-white text-xs font-bold hover:bg-black transition-all shadow-md disabled:opacity-50"
+              className="w-full min-h-[44px] py-3.5 rounded-full bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] text-xs font-bold hover:opacity-90 transition-all shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 disabled:opacity-50"
             >
               {loginLoading
                 ? "Verificando credenciales..."

@@ -271,6 +271,96 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     }
   };
 
+  const restoredDraftRef = useRef(false);
+  const BOOKING_DRAFT_KEY = "reservas_booking_draft_v1";
+
+  const selectedServiceId = selectedService?.id;
+
+  const persistBookingDraft = useCallback(() => {
+    if (typeof window === "undefined" || !selectedServiceId) return;
+    try {
+      window.sessionStorage.setItem(
+        BOOKING_DRAFT_KEY,
+        JSON.stringify({
+          serviceId: selectedServiceId,
+          staffId: selectedStaffId,
+          dateStr: selectedDateStr,
+          time: selectedTime,
+          customerNotes,
+          customerPhone,
+          savedAt: Date.now(),
+        })
+      );
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [
+    selectedServiceId,
+    selectedStaffId,
+    selectedDateStr,
+    selectedTime,
+    customerNotes,
+    customerPhone,
+  ]);
+
+  const clearBookingDraft = useCallback(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.removeItem(BOOKING_DRAFT_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+  }, []);
+
+  useEffect(() => {
+    if (restoredDraftRef.current || services.length === 0) return;
+    restoredDraftRef.current = true;
+    const timer = setTimeout(() => {
+      try {
+        const raw = window.sessionStorage.getItem(BOOKING_DRAFT_KEY);
+        if (!raw) return;
+        const draft = JSON.parse(raw) as {
+          serviceId?: string;
+          staffId?: string;
+          dateStr?: string;
+          time?: string;
+          customerNotes?: string;
+          customerPhone?: string;
+          savedAt?: number;
+        };
+        if (
+          !draft?.savedAt ||
+          Date.now() - draft.savedAt > 30 * 60 * 1000
+        ) {
+          window.sessionStorage.removeItem(BOOKING_DRAFT_KEY);
+          return;
+        }
+        const matchedService = services.find((s) => s.id === draft.serviceId);
+        if (!matchedService) return;
+        setSelectedService(matchedService);
+        if (draft.staffId) setSelectedStaffId(draft.staffId);
+        if (draft.dateStr) setSelectedDateStr(draft.dateStr);
+        if (draft.time) setSelectedTime(draft.time);
+        if (draft.customerNotes) setCustomerNotes(draft.customerNotes);
+        if (draft.customerPhone) {
+          setCustomerPhoneOverride({
+            userId: currentUser?.id ?? null,
+            value: draft.customerPhone,
+          });
+        }
+        if (draft.time) {
+          setStep(4);
+        } else if (draft.dateStr) {
+          setStep(3);
+        }
+        window.sessionStorage.removeItem(BOOKING_DRAFT_KEY);
+      } catch {
+        // Ignore malformed draft
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [services, currentUser?.id]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -485,6 +575,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     setCustomerNotes("");
     setBookingError(null);
     if (!options.keepConfirmed) setConfirmedAppointment(null);
+    if (!options.keepService && !options.keepStaff) clearBookingDraft();
   };
 
   const handleConfirmBooking = async () => {
@@ -556,6 +647,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
         return;
       }
       setConfirmedAppointment(data.appointment);
+      clearBookingDraft();
       resetBookingWizardState({ keepConfirmed: true });
       setStep(5);
       onRefresh();
@@ -690,7 +782,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     <div className="w-full max-w-md md:max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto min-h-dvh md:min-h-0 md:my-6 md:rounded-[32px] bg-white text-[#1F1F23] pb-16 md:pb-8 shadow-2xl relative border-x md:border border-zinc-200/80 flex flex-col transition-all duration-300">
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
 
-      {(activeTab === "my-appointments" || step === 1) && (
+      {(activeTab === "my-appointments" || step !== 5) && (
         <ClientHeader
           settings={settings}
           currentUser={currentUser}
@@ -702,6 +794,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
           pushBusy={pushBusy}
           testingPush={testingPush}
           pushMessage={pushMessage}
+          compact={activeTab === "book" && step >= 2 && step <= 4}
           onDismissPushMessage={() => setPushMessage(null)}
           onOpenMapModal={() => setShowMapModal(true)}
           onOpenPwaModal={() => setShowPwaModal(true)}
@@ -747,19 +840,21 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
           {step >= 2 && step <= 4 && (
             <div className="flex items-center justify-between pt-3 pb-5">
               <button
+                type="button"
                 onClick={() => {
                   if (step === 2) resetBookingWizardState();
                   setBookingError(null);
                   setStep((prev) => (prev - 1) as 1 | 2 | 3 | 4 | 5);
                 }}
-                className="w-11 h-11 rounded-full bg-[#1F1F23] text-white flex items-center justify-center shadow-sm hover:bg-black active:scale-95 transition-all"
+                className="w-11 h-11 rounded-full bg-[var(--brand-primary,#1F1F23)] text-[var(--brand-primary-fg,#FFFFFF)] flex items-center justify-center shadow-sm hover:opacity-90 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
                 title="Regresar atrás"
+                aria-label="Regresar al paso anterior"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
 
               <div className="text-center">
-                <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block">
+                <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider block">
                   Paso {step} de 4
                 </span>
                 <h2 className="text-base md:text-lg font-bold text-[#1F1F23]">
@@ -769,12 +864,12 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
                 </h2>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5" aria-hidden="true">
                 {[1, 2, 3, 4].map((n) => (
                   <span
                     key={n}
                     className={`h-2 rounded-full transition-all ${
-                      n <= step ? "w-6 bg-[#1F1F23]" : "w-2 bg-zinc-300"
+                      n <= step ? "w-6 bg-[var(--brand-primary,#1F1F23)]" : "w-2 bg-zinc-300"
                     }`}
                   />
                 ))}
@@ -871,6 +966,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
               bookingLoading={bookingLoading}
               onOpenMapModal={() => setShowMapModal(true)}
               onOpenAuthModal={() => setShowAuthModal(true)}
+              onBeforeGoogleAuth={persistBookingDraft}
               onLogout={handleLogout}
               onBackToSlots={() => {
                 setSelectedTime("");
@@ -987,6 +1083,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
         authLoading={authLoading}
         authError={authError}
         setAuthError={setAuthError}
+        onBeforeGoogleAuth={persistBookingDraft}
         onSubmit={handleAuthSubmit}
         onLogout={handleLogout}
         onClose={() => setShowAuthModal(false)}

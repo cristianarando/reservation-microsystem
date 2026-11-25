@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useId } from "react";
 import dynamic from "next/dynamic";
 import { Save, MapPin, Settings } from "lucide-react";
 import { DEFAULT_BUSINESS_LOGO } from "@/lib/avatars";
@@ -39,6 +39,16 @@ export function AdminSettingsTab({
   onSaveSettings,
   onLogoFileUpload,
 }: AdminSettingsTabProps) {
+  const bizNameId = useId();
+  const taglineId = useId();
+  const staffLabelId = useId();
+  const currencyId = useId();
+  const addressId = useId();
+  const mapsUrlId = useId();
+  const phoneId = useId();
+  const horizonId = useId();
+  const leadTimeId = useId();
+  const cancelHoursId = useId();
   return (
     <div className="p-4 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -120,11 +130,15 @@ export function AdminSettingsTab({
           </div>
         </div>
 
-        <div className="border-[1.5px] border-[#1F1F23] bg-[#F4F4F6] rounded-2xl px-4 py-2">
-          <label className="text-[10px] font-bold text-zinc-500 uppercase block">
+        <div className="border-[1.5px] border-[#1F1F23] bg-[#F4F4F6] rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+          <label
+            htmlFor={bizNameId}
+            className="text-[10px] font-bold text-zinc-600 uppercase block"
+          >
             Nombre del Negocio
           </label>
           <input
+            id={bizNameId}
             type="text"
             value={settingsForm?.name || ""}
             onChange={(e) =>
@@ -134,11 +148,15 @@ export function AdminSettingsTab({
           />
         </div>
 
-        <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2">
-          <label className="text-[10px] font-bold text-zinc-500 uppercase block">
+        <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+          <label
+            htmlFor={taglineId}
+            className="text-[10px] font-bold text-zinc-600 uppercase block"
+          >
             Eslogan o Subtítulo
           </label>
           <input
+            id={taglineId}
             type="text"
             value={settingsForm?.tagline || ""}
             onChange={(e) =>
@@ -149,11 +167,15 @@ export function AdminSettingsTab({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2">
-            <label className="text-[10px] font-bold text-zinc-500 uppercase block">
+          <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+            <label
+              htmlFor={staffLabelId}
+              className="text-[10px] font-bold text-zinc-600 uppercase block"
+            >
               Etiqueta de Profesionales
             </label>
             <input
+              id={staffLabelId}
               type="text"
               value={settingsForm?.staffLabel || ""}
               onChange={(e) =>
@@ -167,11 +189,15 @@ export function AdminSettingsTab({
             />
           </div>
 
-          <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2">
-            <label className="text-[10px] font-bold text-zinc-500 uppercase block">
+          <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+            <label
+              htmlFor={currencyId}
+              className="text-[10px] font-bold text-zinc-600 uppercase block"
+            >
               Símbolo de Moneda
             </label>
             <input
+              id={currencyId}
               type="text"
               value={settingsForm?.currencySymbol || "Bs"}
               onChange={(e) =>
@@ -185,11 +211,15 @@ export function AdminSettingsTab({
           </div>
         </div>
 
-        <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2">
-          <label className="text-[10px] font-bold text-zinc-500 uppercase block">
+        <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+          <label
+            htmlFor={addressId}
+            className="text-[10px] font-bold text-zinc-600 uppercase block"
+          >
             Dirección Física
           </label>
           <input
+            id={addressId}
             type="text"
             value={settingsForm?.addressText || ""}
             onChange={(e) =>
@@ -233,11 +263,15 @@ export function AdminSettingsTab({
             height="260px"
           />
 
-          <div className="border-[1.5px] border-zinc-200 bg-[#F4F4F6] rounded-xl px-3 py-2">
-            <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-0.5">
+          <div className="border-[1.5px] border-zinc-200 bg-[#F4F4F6] rounded-xl px-3 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+            <label
+              htmlFor={mapsUrlId}
+              className="text-[10px] font-bold text-zinc-600 uppercase block mb-0.5"
+            >
               Enlace de Google Maps (Sincronizado Automáticamente)
             </label>
             <input
+              id={mapsUrlId}
               type="url"
               value={settingsForm?.googleMapsUrl || ""}
               onChange={(e) =>
@@ -252,11 +286,15 @@ export function AdminSettingsTab({
           </div>
         </div>
 
-        <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2">
-          <label className="text-[10px] font-bold text-zinc-500 uppercase block">
+        <div className="border-[1.5px] border-zinc-300 bg-[#F4F4F6] rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+          <label
+            htmlFor={phoneId}
+            className="text-[10px] font-bold text-zinc-600 uppercase block"
+          >
             Teléfono / WhatsApp de Notificaciones
           </label>
           <input
+            id={phoneId}
             type="text"
             value={settingsForm?.phoneWhatsapp || ""}
             onChange={(e) =>
@@ -265,6 +303,7 @@ export function AdminSettingsTab({
                 phoneWhatsapp: e.target.value,
               })
             }
+            placeholder="+591 70000000"
             className="bg-transparent font-medium text-base sm:text-xs text-[#1F1F23] focus:outline-none w-full"
           />
         </div>
@@ -284,11 +323,15 @@ export function AdminSettingsTab({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-            <div className="border-[1.5px] border-zinc-300 bg-white rounded-2xl px-4 py-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase block">
+            <div className="border-[1.5px] border-zinc-300 bg-white rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+              <label
+                htmlFor={horizonId}
+                className="text-[10px] font-bold text-zinc-600 uppercase block"
+              >
                 Ventana de Reserva Base (Días)
               </label>
               <input
+                id={horizonId}
                 type="number"
                 min={1}
                 max={90}
@@ -301,16 +344,20 @@ export function AdminSettingsTab({
                 }
                 className="bg-transparent font-medium text-base sm:text-xs text-[#1F1F23] focus:outline-none w-full"
               />
-              <span className="text-[10px] text-zinc-400 block mt-0.5">
+              <span className="text-[10px] text-zinc-500 block mt-0.5">
                 Anticipación máxima por defecto
               </span>
             </div>
 
-            <div className="border-[1.5px] border-zinc-300 bg-white rounded-2xl px-4 py-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase block">
+            <div className="border-[1.5px] border-zinc-300 bg-white rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+              <label
+                htmlFor={leadTimeId}
+                className="text-[10px] font-bold text-zinc-600 uppercase block"
+              >
                 Aviso Previo Mínimo Base
               </label>
               <select
+                id={leadTimeId}
                 value={settingsForm?.minLeadTimeMinutes ?? 30}
                 onChange={(e) =>
                   onUpdateSettingsForm({
@@ -329,16 +376,20 @@ export function AdminSettingsTab({
                 <option value={120}>120 minutos (2 horas)</option>
                 <option value={1440}>24 horas antes</option>
               </select>
-              <span className="text-[10px] text-zinc-400 block mt-0.5">
+              <span className="text-[10px] text-zinc-500 block mt-0.5">
                 Margen de antelación para el mismo día
               </span>
             </div>
 
-            <div className="border-[1.5px] border-zinc-300 bg-white rounded-2xl px-4 py-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase block">
+            <div className="border-[1.5px] border-zinc-300 bg-white rounded-2xl px-4 py-2 focus-within:ring-2 focus-within:ring-zinc-900/20">
+              <label
+                htmlFor={cancelHoursId}
+                className="text-[10px] font-bold text-zinc-600 uppercase block"
+              >
                 Horas Mínimas Cancelación
               </label>
               <input
+                id={cancelHoursId}
                 type="number"
                 min={0}
                 max={72}
@@ -351,7 +402,7 @@ export function AdminSettingsTab({
                 }
                 className="bg-transparent font-medium text-base sm:text-xs text-[#1F1F23] focus:outline-none w-full"
               />
-              <span className="text-[10px] text-zinc-400 block mt-0.5">
+              <span className="text-[10px] text-zinc-500 block mt-0.5">
                 Regla global para cancelar sin falta
               </span>
             </div>

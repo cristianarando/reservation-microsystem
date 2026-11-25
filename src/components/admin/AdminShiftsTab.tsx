@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useId } from "react";
 import {
   Clock,
   Save,
@@ -101,6 +101,8 @@ export function AdminShiftsTab({
   onUpdateShiftTime,
   onRemoveSpecificShift,
 }: AdminShiftsTabProps) {
+  const horizonSelectId = useId();
+  const leadSelectId = useId();
   const myVacations = (selectedStaff?.timeOffs || []).filter(
     (to) =>
       to.type === "VACATION" ||
@@ -380,7 +382,10 @@ export function AdminShiftsTab({
 
         <div className="grid sm:grid-cols-2 gap-3">
           <div className="p-3 rounded-xl bg-white border border-zinc-200">
-            <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">
+            <label
+              htmlFor={horizonSelectId}
+              className="text-[10px] font-bold text-zinc-600 uppercase block mb-1"
+            >
               Ventana máxima de reserva
             </label>
             {!isEditingShifts ? (
@@ -392,9 +397,10 @@ export function AdminShiftsTab({
               </div>
             ) : (
               <select
+                id={horizonSelectId}
                 value={editingHorizonDays}
                 onChange={(e) => setEditingHorizonDays(Number(e.target.value))}
-                className="w-full text-base sm:text-xs font-semibold bg-zinc-50 border border-zinc-300 rounded-lg p-2 focus:outline-none"
+                className="w-full text-base sm:text-xs font-semibold bg-zinc-50 border border-zinc-300 rounded-lg p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
               >
                 <option value={3}>3 días hacia adelante</option>
                 <option value={7}>7 días (1 semana - Recomendado)</option>
@@ -404,14 +410,17 @@ export function AdminShiftsTab({
                 <option value={60}>60 días (2 meses)</option>
               </select>
             )}
-            <span className="text-[10px] text-zinc-400 block mt-1">
+            <span className="text-[10px] text-zinc-500 block mt-1">
               Los pacientes solo podrán agendar dentro de esta ventana de
               tiempo.
             </span>
           </div>
 
           <div className="p-3 rounded-xl bg-white border border-zinc-200">
-            <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">
+            <label
+              htmlFor={leadSelectId}
+              className="text-[10px] font-bold text-zinc-600 uppercase block mb-1"
+            >
               Margen mínimo de aviso previo
             </label>
             {!isEditingShifts ? (
@@ -428,9 +437,10 @@ export function AdminShiftsTab({
               </div>
             ) : (
               <select
+                id={leadSelectId}
                 value={editingLeadTimeMin}
                 onChange={(e) => setEditingLeadTimeMin(Number(e.target.value))}
-                className="w-full text-base sm:text-xs font-semibold bg-zinc-50 border border-zinc-300 rounded-lg p-2 focus:outline-none"
+                className="w-full text-base sm:text-xs font-semibold bg-zinc-50 border border-zinc-300 rounded-lg p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30"
               >
                 <option value={0}>
                   Sin anticipación (En cualquier momento / Inmediato - 0 min)
@@ -443,7 +453,7 @@ export function AdminShiftsTab({
                 <option value={1440}>24 horas de antelación</option>
               </select>
             )}
-            <span className="text-[10px] text-zinc-400 block mt-1">
+            <span className="text-[10px] text-zinc-500 block mt-1">
               Tiempo mínimo de margen antes de una cita para que un cliente
               pueda agendar. Si eliges &quot;Sin anticipación&quot;, los
               pacientes pueden agendar en cualquier momento para el mismo día de
@@ -671,10 +681,14 @@ export function AdminShiftsTab({
                           </span>
 
                           <div className="flex items-center gap-1.5">
-                            <label className="text-[10px] text-zinc-400">
+                            <label
+                              htmlFor={`shift-start-${d.day}-${shift.tempId || idx}`}
+                              className="text-[10px] text-zinc-600"
+                            >
                               De
                             </label>
                             <input
+                              id={`shift-start-${d.day}-${shift.tempId || idx}`}
                               type="time"
                               required
                               value={shift.startTime}
@@ -685,7 +699,7 @@ export function AdminShiftsTab({
                                   e.target.value
                                 )
                               }
-                              className={`rounded-lg px-2 py-1 font-bold text-base sm:text-xs focus:outline-none transition-all ${
+                              className={`rounded-lg px-2 py-1 font-bold text-base sm:text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 transition-all ${
                                 hasShiftError
                                   ? "bg-white border-2 border-red-500 text-red-900"
                                   : "bg-white border border-zinc-300 text-zinc-800"
@@ -694,8 +708,14 @@ export function AdminShiftsTab({
                           </div>
 
                           <div className="flex items-center gap-1.5">
-                            <label className="text-[10px] text-zinc-400">a</label>
+                            <label
+                              htmlFor={`shift-end-${d.day}-${shift.tempId || idx}`}
+                              className="text-[10px] text-zinc-600"
+                            >
+                              a
+                            </label>
                             <input
+                              id={`shift-end-${d.day}-${shift.tempId || idx}`}
                               type="time"
                               required
                               value={shift.endTime}
@@ -706,7 +726,7 @@ export function AdminShiftsTab({
                                   e.target.value
                                 )
                               }
-                              className={`rounded-lg px-2 py-1 font-bold text-base sm:text-xs focus:outline-none transition-all ${
+                              className={`rounded-lg px-2 py-1 font-bold text-base sm:text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/30 transition-all ${
                                 hasShiftError
                                   ? "bg-white border-2 border-red-500 text-red-900"
                                   : "bg-white border border-zinc-300 text-zinc-800"

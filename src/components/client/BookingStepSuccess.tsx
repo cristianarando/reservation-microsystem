@@ -2,6 +2,8 @@
 
 import React from "react";
 import { Bell, Check } from "lucide-react";
+import { PushNotificationToggle } from "@/components/ui/PushNotificationToggle";
+import { Button } from "@/components/ui/Button";
 import type { DevicePushState } from "@/lib/push-client";
 import {
   formatSpanishDateInTz,
@@ -92,27 +94,15 @@ export function BookingStepSuccess({
                 : "Avísame si cambia mi cita"}
             </span>
           </div>
-          <button
-            type="button"
-            disabled={pushBusy}
-            onClick={onTogglePush}
-            data-testid="client-push-toggle-btn"
-            className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all shrink-0 ${
-              pushState === "subscribed"
-                ? "bg-zinc-200 text-zinc-800 hover:bg-zinc-300"
-                : "bg-[#1F1F23] text-white hover:bg-black"
-            } disabled:opacity-50`}
-          >
-            {pushBusy
-              ? "Procesando..."
-              : pushState === "subscribed"
-              ? "Desactivar"
-              : pushState === "insecure_context"
-              ? "Requiere HTTPS"
-              : "Activar avisos"}
-          </button>
+          <PushNotificationToggle
+            variant="card"
+            pushState={pushState}
+            pushLoading={pushBusy}
+            toggleTestId="client-push-toggle-btn"
+            onToggle={onTogglePush}
+          />
         </div>
-        <p className="text-[11px] text-zinc-500 leading-snug">
+        <p className="text-[11px] text-zinc-600 leading-snug">
           {pushState === "insecure_context"
             ? "Las notificaciones del navegador requieren acceder con HTTPS (ej. https://tudominio.com)."
             : pushState === "ios_needs_install"
@@ -129,18 +119,22 @@ export function BookingStepSuccess({
       </div>
 
       <div className="mt-6 w-full max-w-md space-y-2.5">
-        <button
+        <Button
+          variant="primary"
+          size="lg"
           onClick={onViewMyAppointments}
-          className="w-full rounded-full bg-[#1F1F23] text-white h-14 font-semibold text-sm shadow-md hover:bg-black"
+          className="w-full rounded-full h-14 text-sm shadow-md"
         >
           Ver en Mis Citas
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="secondary"
+          size="pill"
           onClick={onBackHome}
-          className="w-full rounded-full bg-zinc-100 text-zinc-700 h-12 font-semibold text-xs hover:bg-zinc-200"
+          className="w-full h-12 text-xs"
         >
           Volver al Inicio
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -22,12 +22,12 @@ export function ClientFooter({
         <p className="font-semibold text-zinc-700">
           {businessName || "Clínica & Reservas"}
         </p>
-        <p className="text-[11px] text-zinc-400">
+        <p className="text-[11px] text-zinc-600">
           {addressText || "Atención con cita previa"}
         </p>
       </div>
 
-      <p className="text-[11px] text-zinc-400 max-w-md mx-auto leading-relaxed">
+      <p className="text-[11px] text-zinc-600 max-w-md mx-auto leading-relaxed">
         {isHealthBusiness
           ? "Agenda digital sujeta a disponibilidad y confirmación. Precios referenciales sujetos a valoración presencial. Este portal no atiende emergencias médicas ni urgencias vitales."
           : "Agenda digital sujeta a disponibilidad y confirmación. Precios referenciales sujetos a evaluación presencial."}
@@ -73,7 +73,7 @@ export function ClientFooter({
       </nav>
 
       <div className="pt-2 border-t border-zinc-200/60 flex flex-col items-center gap-1">
-        <p className="text-[10px] text-zinc-400">
+        <p className="text-[10px] text-zinc-500">
           © {serverYear} {businessName || "Clínica & Reservas"}. Todos los derechos reservados.
         </p>
         <Link
