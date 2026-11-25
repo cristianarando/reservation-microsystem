@@ -5,6 +5,11 @@ import { ArrowRight } from "lucide-react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
 import {
+  formatSpanishDateInTz,
+  getDayOfWeekInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
+import {
   AvailabilityUnavailableReason,
   PublicTimeOffNotice,
   describeTimeOffBlock,
@@ -73,6 +78,7 @@ interface DateOptionItem {
 
 interface BookingStepDateTimeProps {
   settings?: PortalBusinessSettings | null;
+  referenceNowIso?: string;
   selectedService: PortalService | null;
   selectedStaffId: string;
   selectedStaffObj?: PortalStaffMember;
@@ -92,6 +98,7 @@ interface BookingStepDateTimeProps {
 
 export function BookingStepDateTime({
   settings,
+  referenceNowIso,
   selectedService,
   selectedStaffId,
   selectedStaffObj,
@@ -108,13 +115,15 @@ export function BookingStepDateTime({
   onSelectTime,
   onContinue,
 }: BookingStepDateTimeProps) {
+  const businessTz = resolveBusinessTimeZone(settings?.timezone);
+  const referenceNow = referenceNowIso ? new Date(referenceNowIso) : new Date();
   const calendarTargetStaff =
     selectedStaffId !== "ANY"
       ? staffList.filter((s) => s.id === selectedStaffId)
       : eligibleStaff.filter((s) => s.isActive !== false);
 
   const isTodaySelected =
-    selectedDateStr === formatLocalDateYYYYMMDD(new Date());
+    selectedDateStr === formatLocalDateYYYYMMDD(referenceNow, businessTz);
   const theme =
     (unavailableReason?.code && EMPTY_STATE_THEMES[unavailableReason.code]) ||
     DEFAULT_EMPTY_THEME;
@@ -211,9 +220,7 @@ export function BookingStepDateTime({
                 );
                 const hasClosedBadge =
                   !hasVacationBadge && matchingFullBlocks.length > 0;
-                const itemDayOfWeek = new Date(
-                  `${item.dateStr}T12:00:00`
-                ).getDay();
+                const itemDayOfWeek = getDayOfWeekInTz(item.dateStr, businessTz);
                 const hasWorkingShiftOnDay =
                   calendarTargetStaff.length === 0 ||
                   calendarTargetStaff.some((st) =>
@@ -310,13 +317,10 @@ export function BookingStepDateTime({
                         <span>🌙 Día no laboral (Horario semanal)</span>
                         <span className="text-[11px] font-semibold text-zinc-600">
                           📅 Descanso habitual (
-                          {new Date(
-                            `${selectedDateStr}T12:00:00`
-                          ).toLocaleDateString("es-ES", {
-                            weekday: "short",
-                            day: "numeric",
-                            month: "short",
-                          })}
+                          {formatSpanishDateInTz(
+                            `${selectedDateStr}T12:00:00Z`,
+                            businessTz
+                          )}
                           )
                         </span>
                       </div>

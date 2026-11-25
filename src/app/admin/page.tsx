@@ -11,7 +11,12 @@ export default async function AdminPage({
   const params = await searchParams;
   let serializedBootstrap = null;
   try {
-    const payload = await getBootstrapPayload();
+    const now = Date.now();
+    const payload = await getBootstrapPayload({
+      agendaFrom: new Date(now - 30 * 86_400_000),
+      agendaTo: new Date(now + 90 * 86_400_000),
+      usersLimit: 200,
+    });
     serializedBootstrap = JSON.parse(JSON.stringify(payload));
   } catch (err) {
     console.error("SSR admin bootstrap fallback:", err);

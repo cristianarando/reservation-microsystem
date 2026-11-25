@@ -17,6 +17,7 @@ import type {
 interface BookingStepStaffProps {
   selectedService: PortalService | null;
   settings?: PortalBusinessSettings | null;
+  referenceNowIso?: string;
   eligibleStaff: PortalStaffMember[];
   onSelectStaff: (staffId: string) => void;
   onBackToServices: () => void;
@@ -25,20 +26,25 @@ interface BookingStepStaffProps {
 export function BookingStepStaff({
   selectedService,
   settings,
+  referenceNowIso,
   eligibleStaff,
   onSelectStaff,
   onBackToServices,
 }: BookingStepStaffProps) {
   const horizonDays = settings?.bookingHorizonDays || 7;
-  const now = new Date();
-  const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const now = referenceNowIso ? new Date(referenceNowIso) : new Date();
+  const windowStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
   const windowEnd = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() + horizonDays,
-    23,
-    59,
-    59
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + horizonDays,
+      23,
+      59,
+      59
+    )
   );
 
   const isStaffOnVacationEntireWindow = (st: PortalStaffMember) => {

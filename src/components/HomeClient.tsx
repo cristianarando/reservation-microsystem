@@ -17,23 +17,32 @@ export function HomeClient({ initialData }: HomeClientProps) {
   const [loading, setLoading] = useState<boolean>(!initialData);
 
   const inFlightRef = React.useRef<Promise<void> | null>(null);
+  const pendingReloadRef = React.useRef<boolean>(false);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { force?: boolean }) => {
     if (inFlightRef.current) {
+      if (opts?.force) {
+        pendingReloadRef.current = true;
+      }
       return inFlightRef.current;
     }
     const task = (async () => {
       try {
-        const res = await fetch("/api/bootstrap", { cache: "no-store" });
-        if (!res.ok) {
-          console.error("Bootstrap HTTP status:", res.status);
-        }
-        const json = await res.json().catch(() => null);
-        if (json) {
-          setData(json);
-        }
-      } catch (e) {
-        console.error("Error loading bootstrap data:", e);
+        do {
+          pendingReloadRef.current = false;
+          try {
+            const res = await fetch("/api/bootstrap", { cache: "no-store" });
+            if (!res.ok) {
+              console.error("Bootstrap HTTP status:", res.status);
+            }
+            const json = await res.json().catch(() => null);
+            if (json) {
+              setData(json);
+            }
+          } catch (e) {
+            console.error("Error loading bootstrap data:", e);
+          }
+        } while (pendingReloadRef.current);
       } finally {
         setLoading(false);
         inFlightRef.current = null;
@@ -99,7 +108,12 @@ export function HomeClient({ initialData }: HomeClientProps) {
 
       {/* Customer Booking Flow */}
       <main className="flex-1 w-full py-0 md:py-8 md:px-6 flex flex-col items-center justify-start">
-        <ClientApp initialData={data} onRefresh={loadData} />
+        <ClientApp
+          initialData={data}
+          onRefresh={() => {
+            void loadData({ force: true });
+          }}
+        />
       </main>
     </div>
   );

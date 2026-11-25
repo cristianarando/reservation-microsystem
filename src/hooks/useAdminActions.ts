@@ -68,6 +68,7 @@ export function useAdminActions(options: UseAdminActionsOptions) {
   });
 
   const schedule = useAdminScheduleOverrides({
+    timezone: options.settings?.timezone,
     agendaDateStr: options.agendaDateStr,
     selectedStaffId: options.selectedStaffId,
     onSelectStaffId: options.onSelectStaffId,

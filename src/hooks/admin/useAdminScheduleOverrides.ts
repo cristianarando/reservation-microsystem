@@ -7,9 +7,17 @@ import type {
   ImprevistoModalState,
   VacationModalState,
 } from "@/components/admin/AdminOperationModals";
+import {
+  addDaysYYYYMMDD,
+  formatDateYYYYMMDDInTz,
+  getDayBoundsInTz,
+  parseDateAndTimeInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import type { PortalAppointment } from "@/types/portal";
 
 interface UseAdminScheduleOverridesOptions {
+  timezone?: string | null;
   agendaDateStr: string;
   selectedStaffId: string;
   onSelectStaffId: (id: string) => void;
@@ -27,6 +35,7 @@ interface UseAdminScheduleOverridesOptions {
 }
 
 export function useAdminScheduleOverrides({
+  timezone,
   agendaDateStr,
   selectedStaffId,
   onSelectStaffId,
@@ -40,8 +49,16 @@ export function useAdminScheduleOverrides({
   showToast,
   onRefresh,
 }: UseAdminScheduleOverridesOptions) {
+  const businessTz = resolveBusinessTimeZone(timezone);
+
   const loadDayAppointments = useCallback(() => {
-    fetch("/api/bootstrap", { cache: "no-store" })
+    const todayStr = formatDateYYYYMMDDInTz(new Date(), businessTz);
+    const fromStr = addDaysYYYYMMDD(todayStr, -30);
+    const toStr = addDaysYYYYMMDD(todayStr, 90);
+    fetch(
+      `/api/bootstrap?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&usersLimit=200`,
+      { cache: "no-store" }
+    )
       .then(async (res) => {
         if (!res.ok) return null;
         return res.json().catch(() => null);
@@ -54,24 +71,33 @@ export function useAdminScheduleOverrides({
         setAllAppointments(apts);
       })
       .catch((err) => console.error("Error loading appointments:", err));
-  }, [setAllAppointments]);
+  }, [businessTz, setAllAppointments]);
 
   const handleQuickImprevisto = async (
     resolution?: string,
     overrideStaffId?: string
   ) => {
-    let startAt = new Date(`${agendaDateStr}T00:00:00`);
-    let endAt = new Date(`${agendaDateStr}T09:30:00`);
+    const { startOfDay, endOfDay } = getDayBoundsInTz(agendaDateStr, businessTz);
+    let startAt = startOfDay;
+    let endAt = endOfDay;
 
     if (imprevistoModal.type === "LATE_START") {
-      startAt = new Date(`${agendaDateStr}T00:00:00`);
-      endAt = new Date(`${agendaDateStr}T${imprevistoModal.timeStr}:00`);
+      startAt = startOfDay;
+      endAt = parseDateAndTimeInTz(
+        agendaDateStr,
+        imprevistoModal.timeStr,
+        businessTz
+      );
     } else if (imprevistoModal.type === "EARLY_LEAVE") {
-      startAt = new Date(`${agendaDateStr}T${imprevistoModal.timeStr}:00`);
-      endAt = new Date(`${agendaDateStr}T23:59:59`);
+      startAt = parseDateAndTimeInTz(
+        agendaDateStr,
+        imprevistoModal.timeStr,
+        businessTz
+      );
+      endAt = endOfDay;
     } else if (imprevistoModal.type === "FULL_DAY_OFF") {
-      startAt = new Date(`${agendaDateStr}T00:00:00`);
-      endAt = new Date(`${agendaDateStr}T23:59:59`);
+      startAt = startOfDay;
+      endAt = endOfDay;
     }
 
     const targetStaffId =
@@ -184,8 +210,14 @@ export function useAdminScheduleOverrides({
       return;
     }
 
-    const startAt = new Date(`${vacationModal.startDate}T00:00:00`);
-    const endAt = new Date(`${vacationModal.endDate}T23:59:59`);
+    const { startOfDay: startAt } = getDayBoundsInTz(
+      vacationModal.startDate,
+      businessTz
+    );
+    const { endOfDay: endAt } = getDayBoundsInTz(
+      vacationModal.endDate,
+      businessTz
+    );
     const targetStaffId = vacationModal.staffId || selectedStaffId;
 
     try {

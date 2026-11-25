@@ -7,6 +7,11 @@ import {
   isPastUntickedAppointment,
   isUpcomingActiveAppointment,
 } from "@/lib/booking-rules";
+import {
+  formatSpanishDateInTz,
+  formatSpanishTimeInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import type { DevicePushState } from "@/lib/push-client";
 import type {
   PortalAppointment,
@@ -17,6 +22,7 @@ import type {
 interface ClientMyAppointmentsTabProps {
   currentUser?: PortalUser | null;
   settings?: PortalBusinessSettings | null;
+  referenceNowIso?: string;
   userAppointments: PortalAppointment[];
   maxActiveAllowed: number;
   highlightedAppointmentId: string | null;
@@ -46,6 +52,7 @@ interface ClientMyAppointmentsTabProps {
 export function ClientMyAppointmentsTab({
   currentUser,
   settings,
+  referenceNowIso,
   userAppointments,
   maxActiveAllowed,
   highlightedAppointmentId,
@@ -71,7 +78,8 @@ export function ClientMyAppointmentsTab({
   onCancelAppointment,
   onRepeatService,
 }: ClientMyAppointmentsTabProps) {
-  const listNow = new Date();
+  const businessTz = resolveBusinessTimeZone(settings?.timezone);
+  const listNow = referenceNowIso ? new Date(referenceNowIso) : new Date();
   const activeApts = userAppointments.filter((a) =>
     isUpcomingActiveAppointment(a, listNow)
   );
@@ -163,16 +171,8 @@ export function ClientMyAppointmentsTab({
         <div className="mt-1.5 text-[11px] text-zinc-600 flex items-center gap-1.5 flex-wrap">
           <Calendar className="w-3.5 h-3.5 text-zinc-400" />
           <span>
-            {new Date(apt.startAt).toLocaleDateString("es-ES", {
-              weekday: "short",
-              day: "numeric",
-              month: "short",
-            })}{" "}
-            •{" "}
-            {new Date(apt.startAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            {formatSpanishDateInTz(new Date(apt.startAt), businessTz)} •{" "}
+            {formatSpanishTimeInTz(new Date(apt.startAt), businessTz)}
           </span>
           {apt.staff?.displayName && <span>• con {apt.staff.displayName}</span>}
         </div>
@@ -345,7 +345,7 @@ export function ClientMyAppointmentsTab({
                       <div className="flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5 text-zinc-400" />
                         <span>
-                          {new Date(apt.startAt).toLocaleDateString("es-ES", {
+                          {formatSpanishDateInTz(new Date(apt.startAt), businessTz, {
                             weekday: "long",
                             day: "numeric",
                             month: "long",
@@ -355,10 +355,7 @@ export function ClientMyAppointmentsTab({
                       <div className="flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-zinc-400" />
                         <span className="font-semibold text-zinc-900">
-                          {new Date(apt.startAt).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}{" "}
+                          {formatSpanishTimeInTz(new Date(apt.startAt), businessTz)}{" "}
                           ({apt.service?.durationMin} min)
                         </span>
                       </div>
@@ -457,19 +454,8 @@ export function ClientMyAppointmentsTab({
                     </span>
                   </div>
                   <div className="mt-2 text-zinc-700">
-                    📅{" "}
-                    {new Date(apt.startAt).toLocaleDateString("es-ES", {
-                      weekday: "short",
-                      day: "numeric",
-                      month: "short",
-                    })}{" "}
-                    a las{" "}
-                    <b>
-                      {new Date(apt.startAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </b>{" "}
+                    📅 {formatSpanishDateInTz(new Date(apt.startAt), businessTz)} a las{" "}
+                    <b>{formatSpanishTimeInTz(new Date(apt.startAt), businessTz)}</b>{" "}
                     con {apt.staff?.displayName}
                   </div>
                   {apt.customerNotes && (

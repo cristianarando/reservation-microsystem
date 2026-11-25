@@ -1,10 +1,22 @@
 "use client";
 
 import React from "react";
+import dynamic from "next/dynamic";
 import { Save, MapPin, Settings } from "lucide-react";
-import InteractiveMapPicker from "@/components/InteractiveMapPicker";
 import { DEFAULT_BUSINESS_LOGO } from "@/lib/avatars";
 import type { PortalBusinessSettings } from "@/types/portal";
+
+const InteractiveMapPicker = dynamic(
+  () => import("@/components/InteractiveMapPicker"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[260px] rounded-2xl border border-zinc-200 bg-zinc-100 animate-pulse flex items-center justify-center text-xs text-zinc-500">
+        Cargando mapa interactivo...
+      </div>
+    ),
+  }
+);
 
 type SettingsFormUpdater =
   | PortalBusinessSettings

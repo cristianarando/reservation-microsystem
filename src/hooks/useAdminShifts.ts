@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { ToastItem } from "@/components/ui/ToastContainer";
 import {
   validateAllShifts,
@@ -48,6 +48,15 @@ export function useAdminShifts({
   const [highlightedShiftDay, setHighlightedShiftDay] = useState<number | null>(
     null
   );
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
 
   const shiftsValidation = useMemo(() => {
     return validateAllShifts(editingShiftsList, {
@@ -85,12 +94,14 @@ export function useAdminShifts({
 
       if (typeof focusDayOfWeek === "number") {
         setHighlightedShiftDay(focusDayOfWeek);
-        setTimeout(() => {
+        if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        scrollTimerRef.current = setTimeout(() => {
           document
             .getElementById(`shift-day-${focusDayOfWeek}`)
             ?.scrollIntoView({ behavior: "smooth", block: "center" });
         }, 80);
-        setTimeout(() => {
+        highlightTimerRef.current = setTimeout(() => {
           setHighlightedShiftDay((prev) =>
             prev === focusDayOfWeek ? null : prev
           );

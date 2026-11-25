@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "leaflet/dist/leaflet.css";
 
 :root {
   --brand-primary: #1F1F23;
@@ -49,6 +48,7 @@ body {
   max-height: none !important;
 }
 .leaflet-control-attribution {
-  display: none;
+  font-size: 9px;
+  opacity: 0.75;
 }
 

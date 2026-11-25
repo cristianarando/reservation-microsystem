@@ -185,22 +185,34 @@ export function PwaInstallModal({
         </div>
 
         <div className="mt-4 space-y-2">
-          <button
-            type="button"
-            onClick={async () => {
-              if (deferredPrompt) {
-                deferredPrompt.prompt();
-                await deferredPrompt.userChoice;
-              }
-              onInstallPrompted();
-              onClose();
-            }}
-            className="w-full min-h-[44px] py-3.5 rounded-full bg-[#1F1F23] hover:bg-black text-white text-xs font-bold shadow-md transition-all"
-          >
-            {pwaInstalled
-              ? "✓ Aplicación ya instalada en tu inicio"
-              : "📲 Instalar App Ahora (1-Toque)"}
-          </button>
+          {deferredPrompt ? (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await deferredPrompt.prompt();
+                  const choice = await deferredPrompt.userChoice;
+                  if (choice?.outcome === "accepted") {
+                    onInstallPrompted();
+                    onClose();
+                  }
+                } catch {
+                  // Ignore rejected or aborted install prompt
+                }
+              }}
+              className="w-full min-h-[44px] py-3.5 rounded-full bg-[#1F1F23] hover:bg-black text-white text-xs font-bold shadow-md transition-all"
+            >
+              {pwaInstalled
+                ? "✓ Aplicación ya instalada en tu inicio"
+                : "📲 Instalar App Ahora (1-Toque)"}
+            </button>
+          ) : (
+            <div className="p-3 rounded-2xl bg-zinc-100 border border-zinc-200 text-[11px] text-zinc-700 leading-relaxed text-center">
+              {pwaInstalled
+                ? "✓ Aplicación instalada en tu pantalla de inicio."
+                : "Usa el menú de tu navegador (Compartir ↑ en Safari o ⋮ → Instalar aplicación en Chrome) para añadir el acceso directo."}
+            </div>
+          )}
           <button
             type="button"
             onClick={onClose}

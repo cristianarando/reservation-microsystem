@@ -25,6 +25,13 @@ import { useAvailabilitySlots } from "@/hooks/useAvailabilitySlots";
 import { useClientRealtimeSync } from "@/hooks/useClientRealtimeSync";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
 import { isUpcomingActiveAppointment } from "@/lib/booking-rules";
+import { buildWhatsAppUrl } from "@/lib/whatsapp";
+import {
+  addDaysYYYYMMDD,
+  formatSpanishDateInTz,
+  getDayOfWeekInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import {
   closeDisplayedAccountNotifications,
   getActivePushEndpoint,
@@ -103,12 +110,24 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     enabledForInfiniteScroll: activeTab === "my-appointments",
   });
 
+  const businessTz = resolveBusinessTimeZone(settings?.timezone);
+  const serverNowIso = initialData?.serverNowIso;
+  const referenceNow = useMemo(
+    () => (serverNowIso ? new Date(serverNowIso) : new Date()),
+    [serverNowIso]
+  );
+
   const [selectedService, setSelectedService] = useState<PortalService | null>(
     services[0] || null
   );
   const [selectedStaffId, setSelectedStaffId] = useState<string>("ANY");
   const [selectedDateStr, setSelectedDateStr] = useState<string>(() =>
-    formatLocalDateYYYYMMDD(new Date())
+    formatLocalDateYYYYMMDD(
+      initialData?.serverNowIso
+        ? new Date(initialData.serverNowIso)
+        : new Date(),
+      resolveBusinessTimeZone(initialData?.settings?.timezone)
+    )
   );
   const [selectedTime, setSelectedTime] = useState<string>("");
   const [customerPhoneOverride, setCustomerPhoneOverride] = useState<{
@@ -374,12 +393,20 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
   };
 
   useEffect(() => {
-    const handler = (e: Event) => {
+    const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
-    window.addEventListener("beforeinstallprompt", handler);
-    return () => window.removeEventListener("beforeinstallprompt", handler);
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setPwaInstalled(true);
+    };
+    window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+    window.addEventListener("appinstalled", handleAppInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
   }, []);
 
   useClientRealtimeSync({
@@ -399,28 +426,32 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
 
   const dateOptions = useMemo(() => {
     const items = [];
-    const today = new Date();
+    const todayStr = formatLocalDateYYYYMMDD(referenceNow, businessTz);
     const shortDays = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"];
     for (let i = 0; i < horizonDays; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
+      const dateStr = addDaysYYYYMMDD(todayStr, i);
+      const dayOfWeek = getDayOfWeekInTz(dateStr, businessTz);
+      const dayNum = Number(dateStr.split("-")[2]);
+      const monthName = formatSpanishDateInTz(`${dateStr}T12:00:00Z`, businessTz, {
+        month: "short",
+      });
+      const weekdayShort = formatSpanishDateInTz(
+        `${dateStr}T12:00:00Z`,
+        businessTz,
+        { weekday: "short" }
+      );
       const dayName =
-        i === 0
-          ? "Hoy"
-          : i === 1
-          ? "Mañana"
-          : d.toLocaleDateString("es-ES", { weekday: "short" });
-      const monthName = d.toLocaleDateString("es-ES", { month: "short" });
+        i === 0 ? "Hoy" : i === 1 ? "Mañana" : weekdayShort;
       items.push({
-        dateStr: formatLocalDateYYYYMMDD(d),
-        dayShort: i === 0 ? "HOY" : shortDays[d.getDay()],
-        dayNumber: d.getDate(),
-        label: `${dayName} ${d.getDate()} ${monthName}`,
+        dateStr,
+        dayShort: i === 0 ? "HOY" : shortDays[dayOfWeek] || weekdayShort.toUpperCase(),
+        dayNumber: dayNum,
+        label: `${dayName} ${dayNum} ${monthName}`,
         isToday: i === 0,
       });
     }
     return items;
-  }, [horizonDays]);
+  }, [horizonDays, referenceNow, businessTz]);
 
   const getEligibleStaffForService = useCallback(
     (svc: PortalService | null) => {
@@ -448,7 +479,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
   ) => {
     if (!options.keepService) setSelectedService(services[0] || null);
     if (!options.keepStaff) setSelectedStaffId("ANY");
-    setSelectedDateStr(formatLocalDateYYYYMMDD(new Date()));
+    setSelectedDateStr(formatLocalDateYYYYMMDD(new Date(), businessTz));
     setSelectedTime("");
     clearAvailabilityState();
     setCustomerNotes("");
@@ -540,6 +571,12 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
   };
 
   const handleCancelAppointment = async (aptId: string) => {
+    const fallbackWhatsApp = settings?.phoneWhatsapp
+      ? buildWhatsAppUrl(
+          settings.phoneWhatsapp,
+          "Hola, necesito ayuda para reprogramar o cancelar mi cita."
+        )
+      : "#";
     try {
       const res = await fetch(`/api/appointments/${aptId}/cancel`, {
         method: "POST",
@@ -551,7 +588,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
         setPolicyModal({
           open: true,
           message: data.error || "No es posible cancelar en este momento.",
-          whatsappUrl: data.whatsappUrl || settings?.googleMapsUrl || "#",
+          whatsappUrl: data.whatsappUrl || fallbackWhatsApp,
         });
         return;
       }
@@ -562,7 +599,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
         message:
           "Error al cancelar: " +
           (err instanceof Error ? err.message : "Error desconocido"),
-        whatsappUrl: settings?.googleMapsUrl || "#",
+        whatsappUrl: fallbackWhatsApp,
       });
     }
   };
@@ -616,7 +653,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
     setActiveTab("book");
   };
 
-  const nowSnapshot = new Date();
+  const nowSnapshot = referenceNow;
   const maxActiveAllowed = settings?.maxActiveBookings ?? 2;
   const activeCount = userAppointments.filter((a) =>
     isUpcomingActiveAppointment(a, nowSnapshot)
@@ -762,10 +799,11 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
             <BookingStepStaff
               selectedService={selectedService}
               settings={settings}
+              referenceNowIso={referenceNow.toISOString()}
               eligibleStaff={eligibleStaffForSelectedService}
               onSelectStaff={(staffId) => {
                 setSelectedStaffId(staffId);
-                setSelectedDateStr(formatLocalDateYYYYMMDD(new Date()));
+                setSelectedDateStr(formatLocalDateYYYYMMDD(new Date(), businessTz));
                 setSelectedTime("");
                 setStep(3);
               }}
@@ -779,6 +817,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
           {step === 3 && (
             <BookingStepDateTime
               settings={settings}
+              referenceNowIso={referenceNow.toISOString()}
               selectedService={selectedService}
               selectedStaffId={selectedStaffId}
               selectedStaffObj={selectedStaffObj}
@@ -845,6 +884,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
           {step === 5 && confirmedAppointment && (
             <BookingStepSuccess
               confirmedAppointment={confirmedAppointment}
+              timezone={settings?.timezone}
               pushState={pushState}
               pushBusy={pushBusy}
               pushMessage={pushMessage}
@@ -867,6 +907,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
         <ClientMyAppointmentsTab
           currentUser={currentUser}
           settings={settings}
+          referenceNowIso={referenceNow.toISOString()}
           userAppointments={userAppointments}
           maxActiveAllowed={maxActiveAllowed}
           highlightedAppointmentId={highlightedAppointmentId}
@@ -926,6 +967,7 @@ export function ClientApp({ initialData, onRefresh }: ClientAppProps) {
         businessName={settings?.name}
         addressText={settings?.addressText}
         isHealthBusiness={isHealthBusiness}
+        serverYear={referenceNow.getUTCFullYear()}
       />
 
       <ClientAuthModal

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import {
   AlertTriangle,
   Sun,
@@ -15,6 +15,13 @@ import {
 } from "lucide-react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
+import {
+  addDaysYYYYMMDD,
+  formatSpanishDateInTz,
+  formatSpanishTimeInTz,
+  getDayOfWeekInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import { isTimeOffOnDate } from "@/lib/timeoff-utils";
 import {
   getDayScheduleStatus,
@@ -22,6 +29,7 @@ import {
 } from "@/lib/validation/acceptance-criteria";
 import type {
   PortalAppointment,
+  PortalBusinessSettings,
   PortalStaffMember,
   PortalUser,
 } from "@/types/portal";
@@ -35,6 +43,8 @@ interface AdminAgendaTabProps {
   onSelectStaffId: (staffId: string) => void;
   selectedStaff?: PortalStaffMember;
   staffList: PortalStaffMember[];
+  settings?: PortalBusinessSettings | null;
+  referenceNowIso?: string;
   currentUser?: PortalUser | null;
   isOwnerAdmin: boolean;
   allAppointments: PortalAppointment[];
@@ -67,7 +77,7 @@ interface AdminAgendaTabProps {
     status: string,
     blockCustomer?: boolean,
     customReason?: string
-  ) => void;
+  ) => Promise<void> | void;
   onOpenNoShowModal: (apt: PortalAppointment) => void;
   getWhatsAppCancelUrl: (apt: PortalAppointment) => string;
   getWhatsAppNoShowUrl: (apt: PortalAppointment) => string;
@@ -80,6 +90,8 @@ export function AdminAgendaTab({
   onSelectStaffId,
   selectedStaff,
   staffList,
+  settings,
+  referenceNowIso,
   currentUser,
   isOwnerAdmin,
   allAppointments,
@@ -97,7 +109,10 @@ export function AdminAgendaTab({
   getWhatsAppCancelUrl,
   getWhatsAppNoShowUrl,
 }: AdminAgendaTabProps) {
-  const now = new Date();
+  const [mutatingAptId, setMutatingAptId] = useState<string | null>(null);
+  const businessTz = resolveBusinessTimeZone(settings?.timezone);
+  const now = referenceNowIso ? new Date(referenceNowIso) : new Date();
+  const todayStr = formatLocalDateYYYYMMDD(now, businessTz);
   const agendaStatus = getDayScheduleStatus({
     dateStr: agendaDateStr,
     targets: resolveOverrideTargets(selectedStaffId),
@@ -129,8 +144,7 @@ export function AdminAgendaTab({
       )
     : [];
 
-  const agendaDateObj = new Date(`${agendaDateStr}T00:00:00`);
-  const dayOfWeek = agendaDateObj.getDay();
+  const dayOfWeek = getDayOfWeekInTz(agendaDateStr, businessTz);
   const targets = resolveOverrideTargets(selectedStaffId);
   const isAll = selectedStaffId === "ALL";
   const dayStatus = getDayScheduleStatus({
@@ -203,7 +217,7 @@ export function AdminAgendaTab({
   const otherStaffActiveApts =
     isOwnerAdmin && selectedStaffId && selectedStaffId !== "ALL"
       ? allAppointments.filter((a) => {
-          const aStr = formatLocalDateYYYYMMDD(new Date(a.startAt));
+          const aStr = formatLocalDateYYYYMMDD(new Date(a.startAt), businessTz);
           return (
             aStr === agendaDateStr &&
             a.staffId !== selectedStaffId &&
@@ -302,7 +316,7 @@ export function AdminAgendaTab({
             title={isClosedDay ? agendaStatus.reason : undefined}
             onClick={() => {
               const isToday =
-                agendaDateStr === formatLocalDateYYYYMMDD(new Date());
+                agendaDateStr === todayStr;
               onOpenImprevistoModal({
                 open: true,
                 type: "FULL_DAY_OFF",
@@ -332,7 +346,7 @@ export function AdminAgendaTab({
             >
               {isClosedDay
                 ? closedTag
-                : agendaDateStr === formatLocalDateYYYYMMDD(new Date())
+                : agendaDateStr === todayStr
                 ? "No atender hoy"
                 : `Cerrar ${agendaDateStr}`}
             </div>
@@ -482,7 +496,7 @@ export function AdminAgendaTab({
           </div>
 
           <span className="text-xs font-semibold text-zinc-500 capitalize">
-            {new Date(`${agendaDateStr}T00:00:00`).toLocaleDateString("es-ES", {
+            {formatSpanishDateInTz(`${agendaDateStr}T12:00:00Z`, businessTz, {
               weekday: "long",
             })}
           </span>
@@ -491,15 +505,18 @@ export function AdminAgendaTab({
         {/* Quick 7-Day Pills */}
         <div className="overflow-x-auto no-scrollbar pill-slider flex items-center gap-1.5 py-1">
           {Array.from({ length: 7 }).map((_, idx) => {
-            const d = new Date();
-            d.setDate(d.getDate() + idx);
-            const dStr = formatLocalDateYYYYMMDD(d);
+            const dStr = addDaysYYYYMMDD(todayStr, idx);
             const shortDays = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"];
+            const pillDow = getDayOfWeekInTz(dStr, businessTz);
+            const pillDayNum = Number(dStr.split("-")[2]);
             const dayLabel =
-              idx === 0 ? "Hoy" : idx === 1 ? "Mañ" : shortDays[d.getDay()];
+              idx === 0 ? "Hoy" : idx === 1 ? "Mañ" : shortDays[pillDow];
             const isSel = dStr === agendaDateStr;
             const count = allAppointments.filter((a) => {
-              const aStr = formatLocalDateYYYYMMDD(new Date(a.startAt));
+              const aStr = formatLocalDateYYYYMMDD(
+                new Date(a.startAt),
+                businessTz
+              );
               const matchesStaff =
                 !selectedStaffId ||
                 selectedStaffId === "ALL" ||
@@ -525,7 +542,7 @@ export function AdminAgendaTab({
                 }`}
               >
                 <span>
-                  {dayLabel} {d.getDate()}
+                  {dayLabel} {pillDayNum}
                 </span>
                 {count > 0 && (
                   <span
@@ -568,13 +585,10 @@ export function AdminAgendaTab({
                         ? `🏖️ Vacaciones programadas (${agendaDateStr})`
                         : isFullDay
                         ? `⛔ Día cerrado (${agendaDateStr})`
-                        : `⏳ Horario bloqueado: ${s.toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })} - ${e.toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}`}
+                        : `⏳ Horario bloqueado: ${formatSpanishTimeInTz(
+                            s,
+                            businessTz
+                          )} - ${formatSpanishTimeInTz(e, businessTz)}`}
                     </div>
                     <div className="text-[11px] text-red-800 mt-0.5">
                       Motivo:{" "}
@@ -693,12 +707,10 @@ export function AdminAgendaTab({
                     {otherStaffActiveApts
                       .map(
                         (a) =>
-                          `${a.staff?.displayName || "Doctor"} (${new Date(
-                            a.startAt
-                          ).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })} • ${a.customer?.name || "Cliente"})`
+                          `${a.staff?.displayName || "Doctor"} (${formatSpanishTimeInTz(
+                            new Date(a.startAt),
+                            businessTz
+                          )} • ${a.customer?.name || "Cliente"})`
                       )
                       .join(" — ")}
                   </div>
@@ -757,7 +769,7 @@ export function AdminAgendaTab({
           </div>
         ) : (
           filteredApts.map((apt) => {
-            const isPastTime = new Date(apt.startAt) < new Date();
+            const isPastTime = new Date(apt.startAt) < now;
             const isPending =
               apt.status === "CONFIRMED" ||
               apt.status === "RESCHEDULED_BY_STAFF";
@@ -791,10 +803,7 @@ export function AdminAgendaTab({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-sm text-[#1F1F23]">
-                      {new Date(apt.startAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {formatSpanishTimeInTz(new Date(apt.startAt), businessTz)}
                     </span>
                     <span className="text-xs text-zinc-500">
                       ({apt.service?.durationMin} min)
@@ -903,15 +912,24 @@ export function AdminAgendaTab({
                         Cancelar
                       </button>
                       <button
-                        onClick={() => {
-                          onStatusChange(apt.id, "CANCELLED");
-                          window.open(getWhatsAppCancelUrl(apt), "_blank");
+                        type="button"
+                        disabled={mutatingAptId === apt.id}
+                        onClick={async () => {
+                          setMutatingAptId(apt.id);
+                          try {
+                            await onStatusChange(apt.id, "CANCELLED");
+                            window.open(getWhatsAppCancelUrl(apt), "_blank", "noopener,noreferrer");
+                          } finally {
+                            setMutatingAptId(null);
+                          }
                         }}
-                        className="px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 shadow-sm transition-all"
+                        className="px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 shadow-sm transition-all disabled:opacity-50"
                         title="Cancela la cita y abre WhatsApp con el mensaje listo"
                       >
                         <WhatsAppIcon className="w-3.5 h-3.5" />
-                        <span>Cancelar y avisar</span>
+                        <span>
+                          {mutatingAptId === apt.id ? "Procesando..." : "Cancelar y avisar"}
+                        </span>
                       </button>
                     </>
                   )}

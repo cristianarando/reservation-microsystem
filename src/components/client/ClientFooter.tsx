@@ -7,12 +7,14 @@ interface ClientFooterProps {
   businessName?: string | null;
   addressText?: string | null;
   isHealthBusiness: boolean;
+  serverYear?: number;
 }
 
 export function ClientFooter({
   businessName,
   addressText,
   isHealthBusiness,
+  serverYear = 2026,
 }: ClientFooterProps) {
   return (
     <footer className="mt-auto px-5 md:px-8 py-6 md:py-7 text-center border-t border-zinc-200/80 bg-zinc-50/50 text-xs text-zinc-500 space-y-2.5 md:rounded-b-[32px]">
@@ -72,7 +74,7 @@ export function ClientFooter({
 
       <div className="pt-2 border-t border-zinc-200/60 flex flex-col items-center gap-1">
         <p className="text-[10px] text-zinc-400">
-          © {new Date().getFullYear()} {businessName || "Clínica & Reservas"}. Todos los derechos reservados.
+          © {serverYear} {businessName || "Clínica & Reservas"}. Todos los derechos reservados.
         </p>
         <Link
           href="/admin"

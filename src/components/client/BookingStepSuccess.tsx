@@ -3,10 +3,16 @@
 import React from "react";
 import { Bell, Check } from "lucide-react";
 import type { DevicePushState } from "@/lib/push-client";
+import {
+  formatSpanishDateInTz,
+  formatSpanishTimeInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import type { PortalAppointment } from "@/types/portal";
 
 interface BookingStepSuccessProps {
   confirmedAppointment: PortalAppointment;
+  timezone?: string | null;
   pushState: DevicePushState;
   pushBusy: boolean;
   pushMessage: string | null;
@@ -17,6 +23,7 @@ interface BookingStepSuccessProps {
 
 export function BookingStepSuccess({
   confirmedAppointment,
+  timezone,
   pushState,
   pushBusy,
   pushMessage,
@@ -24,6 +31,7 @@ export function BookingStepSuccess({
   onViewMyAppointments,
   onBackHome,
 }: BookingStepSuccessProps) {
+  const businessTz = resolveBusinessTimeZone(timezone);
   return (
     <div className="flex-1 flex flex-col items-center justify-center text-center py-6">
       <div className="my-4 flex items-center justify-center">
@@ -57,16 +65,9 @@ export function BookingStepSuccess({
         <div className="flex justify-between gap-3">
           <span className="text-zinc-500 shrink-0">Cuándo:</span>
           <span className="font-bold text-zinc-900 text-right">
-            {new Date(confirmedAppointment.startAt).toLocaleDateString("es-ES", {
-              weekday: "short",
-              day: "numeric",
-              month: "short",
-            })}{" "}
+            {formatSpanishDateInTz(new Date(confirmedAppointment.startAt), businessTz)}{" "}
             •{" "}
-            {new Date(confirmedAppointment.startAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            {formatSpanishTimeInTz(new Date(confirmedAppointment.startAt), businessTz)}
           </span>
         </div>
         {confirmedAppointment.customerNotes && (

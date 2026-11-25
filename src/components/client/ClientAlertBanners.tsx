@@ -3,6 +3,11 @@
 import React from "react";
 import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
+import {
+  formatSpanishDateInTz,
+  formatSpanishTimeInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import type {
   PortalAppointment,
   PortalBusinessSettings,
@@ -41,19 +46,17 @@ export function ClientAlertBanners({
   onDismissNotification,
   onRescheduleAfterCancel,
 }: ClientAlertBannersProps) {
+  const businessTz = resolveBusinessTimeZone(settings?.timezone);
   const targetAptDate = targetCancelledApt?.startAt
     ? new Date(targetCancelledApt.startAt)
     : null;
   const targetTimeStr =
     targetAptDate && !isNaN(targetAptDate.getTime())
-      ? targetAptDate.toLocaleTimeString("es-ES", {
-          hour: "2-digit",
-          minute: "2-digit",
-        })
+      ? formatSpanishTimeInTz(targetAptDate, businessTz)
       : "";
   const targetDateStr =
     targetAptDate && !isNaN(targetAptDate.getTime())
-      ? targetAptDate.toLocaleDateString("es-ES", {
+      ? formatSpanishDateInTz(targetAptDate, businessTz, {
           weekday: "long",
           day: "numeric",
           month: "short",

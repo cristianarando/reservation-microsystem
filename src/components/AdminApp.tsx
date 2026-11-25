@@ -1,21 +1,18 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { ToastContainer } from "./ui/ToastContainer";
 import { ConfirmModal, ConfirmModalState } from "./ui/ConfirmModal";
 import { AdminHeader, AdminTabId } from "./admin/AdminHeader";
 import { AdminAgendaTab } from "./admin/AdminAgendaTab";
-import { AdminShiftsTab } from "./admin/AdminShiftsTab";
-import { AdminTeamTab, StaffModalState } from "./admin/AdminTeamTab";
-import { AdminSettingsTab } from "./admin/AdminSettingsTab";
+import type { StaffModalState } from "./admin/AdminTeamTab";
 import {
   AdminOperationModals,
   ImprevistoModalState,
   ConflictDataState,
   VacationModalState,
 } from "./admin/AdminOperationModals";
-import { ServicesCatalogTab } from "./admin/ServicesCatalogTab";
-import { CustomerControlTab } from "./admin/CustomerControlTab";
 import { useToastQueue } from "@/hooks/useToastQueue";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useAdminShifts } from "@/hooks/useAdminShifts";
@@ -26,6 +23,11 @@ import {
   buildStaffInviteWhatsAppUrl,
 } from "@/lib/whatsapp";
 import { formatLocalDateYYYYMMDD } from "@/lib/date-utils";
+import {
+  formatSpanishDateInTz,
+  formatSpanishTimeInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import { showDeduplicatedSystemNotification } from "@/lib/push-client";
 import type {
   PortalAppointment,
@@ -33,6 +35,27 @@ import type {
   PortalStaffMember,
   ServiceModalDraft,
 } from "@/types/portal";
+
+const AdminShiftsTab = dynamic(
+  () => import("./admin/AdminShiftsTab").then((m) => m.AdminShiftsTab),
+  { loading: () => <div className="p-6 text-xs text-zinc-500">Cargando horarios...</div> }
+);
+const AdminTeamTab = dynamic(
+  () => import("./admin/AdminTeamTab").then((m) => m.AdminTeamTab),
+  { loading: () => <div className="p-6 text-xs text-zinc-500">Cargando equipo...</div> }
+);
+const ServicesCatalogTab = dynamic(
+  () => import("./admin/ServicesCatalogTab").then((m) => m.ServicesCatalogTab),
+  { loading: () => <div className="p-6 text-xs text-zinc-500">Cargando servicios...</div> }
+);
+const CustomerControlTab = dynamic(
+  () => import("./admin/CustomerControlTab").then((m) => m.CustomerControlTab),
+  { loading: () => <div className="p-6 text-xs text-zinc-500">Cargando clientes...</div> }
+);
+const AdminSettingsTab = dynamic(
+  () => import("./admin/AdminSettingsTab").then((m) => m.AdminSettingsTab),
+  { loading: () => <div className="p-6 text-xs text-zinc-500">Cargando ajustes...</div> }
+);
 
 interface AdminAppProps {
   initialData: PortalBootstrapData | null;
@@ -55,9 +78,17 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
   const [activeTab, setActiveTab] = useState<AdminTabId>("agenda");
   const isProviderOnly = currentUser?.role === "PROVIDER";
   const isOwnerAdmin = !isProviderOnly;
+  const businessTz = resolveBusinessTimeZone(settings?.timezone);
+  const [appOrigin, setAppOrigin] = useState("https://clinica.app");
+  const seenSseEventKeysRef = useRef<Set<string>>(new Set());
 
   const [agendaDateStr, setAgendaDateStr] = useState<string>(() =>
-    formatLocalDateYYYYMMDD(new Date())
+    formatLocalDateYYYYMMDD(
+      initialData?.serverNowIso
+        ? new Date(initialData.serverNowIso)
+        : new Date(),
+      resolveBusinessTimeZone(initialData?.settings?.timezone)
+    )
   );
 
   const ownProfile = useMemo(() => {
@@ -337,6 +368,15 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
     };
   }, []);
 
+  useEffect(() => {
+    const rafId = requestAnimationFrame(() => {
+      if (typeof window !== "undefined") {
+        setAppOrigin(window.location.origin);
+      }
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+
   // Real-time synchronization via SSE + focus + fallback polling
   useEffect(() => {
     const triggerRefresh = () => {
@@ -346,7 +386,6 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
     };
     window.addEventListener("focus", triggerRefresh);
     document.addEventListener("visibilitychange", triggerRefresh);
-    const poll = setInterval(triggerRefresh, 8000);
 
     let es: EventSource | null = null;
     if (typeof EventSource !== "undefined") {
@@ -359,18 +398,21 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
           latestOnRefreshRef.current();
           if (ev.suppressAlert) return;
 
+          const dedupKey = ev.eventKey
+            ? String(ev.eventKey)
+            : `${ev.type}:${ev.appointmentId || ""}:${ev.timestamp || ""}`;
+          if (seenSseEventKeysRef.current.has(dedupKey)) return;
+          seenSseEventKeysRef.current.add(dedupKey);
+          if (seenSseEventKeysRef.current.size > 150) {
+            const firstKey = seenSseEventKeysRef.current.values().next().value;
+            if (firstKey) seenSseEventKeysRef.current.delete(firstKey);
+          }
+
           const timeLabel = ev.startAt
-            ? new Date(ev.startAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })
+            ? formatSpanishTimeInTz(new Date(ev.startAt), businessTz)
             : "";
           const dateLabel = ev.startAt
-            ? new Date(ev.startAt).toLocaleDateString("es-ES", {
-                weekday: "short",
-                day: "numeric",
-                month: "short",
-              })
+            ? formatSpanishDateInTz(new Date(ev.startAt), businessTz)
             : "";
 
           if (ev.type === "APPOINTMENT_CREATED") {
@@ -388,7 +430,7 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
               body,
               tag: ev.appointmentId
                 ? `apt-new-${ev.appointmentId}`
-                : ev.eventKey || `apt-new-${Date.now()}`,
+                : dedupKey,
               url: "/admin?tab=agenda",
             });
           } else if (
@@ -409,7 +451,7 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
               body,
               tag: ev.appointmentId
                 ? `apt-cust-cancel-${ev.appointmentId}`
-                : ev.eventKey || `apt-cust-cancel-${Date.now()}`,
+                : dedupKey,
               url: "/admin?tab=agenda",
             });
           }
@@ -419,40 +461,59 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
       };
     }
 
+    // Fallback poll only when SSE is absent or not open
+    const poll = setInterval(() => {
+      if (
+        document.visibilityState === "visible" &&
+        (!es || es.readyState !== EventSource.OPEN)
+      ) {
+        latestOnRefreshRef.current();
+      }
+    }, 10000);
+
     return () => {
       window.removeEventListener("focus", triggerRefresh);
       document.removeEventListener("visibilitychange", triggerRefresh);
       clearInterval(poll);
       if (es) es.close();
     };
-  }, [latestShowToastRef]);
+  }, [latestShowToastRef, currentUser?.id, notifyAllStaffPref, businessTz]);
 
   const dayAppointments = useMemo(() => {
     return allAppointments.filter((a) => {
-      const aStr = formatLocalDateYYYYMMDD(new Date(a.startAt));
+      const aStr = formatLocalDateYYYYMMDD(new Date(a.startAt), businessTz);
       const matchesStaff =
         !selectedStaffId ||
         selectedStaffId === "ALL" ||
         a.staffId === selectedStaffId;
       return aStr === agendaDateStr && matchesStaff;
     });
-  }, [allAppointments, agendaDateStr, selectedStaffId]);
+  }, [allAppointments, agendaDateStr, selectedStaffId, businessTz]);
 
   const getWhatsAppCancelUrl = (apt: PortalAppointment) =>
     buildCustomerCancellationWhatsAppUrl(apt, settings?.name);
   const getWhatsAppNoShowUrl = (apt: PortalAppointment) =>
     buildCustomerNoShowWhatsAppUrl(apt, settings?.name);
-  const getWhatsAppStaffInviteUrl = (staff: PortalStaffMember) => {
-    const appUrl =
-      typeof window !== "undefined"
-        ? window.location.origin
-        : "https://clinica.app";
-    return buildStaffInviteWhatsAppUrl(
+  const getWhatsAppStaffInviteUrl = (staff: PortalStaffMember) =>
+    buildStaffInviteWhatsAppUrl(
       staff,
       settings?.phoneWhatsapp,
       settings?.name,
-      appUrl
+      appOrigin
     );
+
+  const handleConfirmCancelAllDay = (targetApts: PortalAppointment[]) => {
+    if (!targetApts || targetApts.length === 0) return;
+    setConfirmDialog({
+      isOpen: true,
+      title: `¿Cancelar ${targetApts.length} cita(s) del ${agendaDateStr}?`,
+      message:
+        "Se cancelarán todas las citas pendientes de la fecha seleccionada y se notificará a cada cliente afectado para que pueda elegir un nuevo horario.",
+      confirmLabel: "Sí, cancelar todas",
+      onConfirm: () => {
+        void actions.handleCancelAllDayAppointments(targetApts);
+      },
+    });
   };
 
   const visibleTabs: { id: AdminTabId; label: string }[] = isOwnerAdmin
@@ -503,6 +564,8 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
           onSelectStaffId={setSelectedStaffId}
           selectedStaff={selectedStaff}
           staffList={staffList}
+          settings={settings}
+          referenceNowIso={initialData?.serverNowIso}
           currentUser={currentUser}
           isOwnerAdmin={isOwnerAdmin}
           allAppointments={allAppointments}
@@ -514,7 +577,7 @@ export function AdminApp({ initialData, onRefresh }: AdminAppProps) {
           onOpenVacationModal={setVacationModal}
           onOpenShiftsEditor={shifts.openShiftsEditor}
           onDeleteTimeOff={actions.handleDeleteTimeOff}
-          onCancelAllDayAppointments={actions.handleCancelAllDayAppointments}
+          onCancelAllDayAppointments={handleConfirmCancelAllDay}
           onStatusChange={actions.handleStatusChange}
           onOpenNoShowModal={setNoShowModalData}
           getWhatsAppCancelUrl={getWhatsAppCancelUrl}

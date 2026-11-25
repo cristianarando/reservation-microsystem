@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { MapPin, Copy, Check } from "lucide-react";
 import {
   buildGoogleMapsEmbedUrl,
@@ -30,6 +30,13 @@ export default function BranchMap({
   className = "",
 }: BranchMapProps) {
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   // Extract real coordinates dynamically from googleMapsUrl if present
   const parsedCoords = parseCoordinatesFromUrl(googleMapsUrl);
@@ -48,9 +55,12 @@ export default function BranchMap({
   const iframeSrc = buildGoogleMapsEmbedUrl(lat, lng, googleMapsUrl);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(addressText);
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(addressText).catch(() => {});
+    }
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
   };
 
   return (

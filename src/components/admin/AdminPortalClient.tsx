@@ -17,6 +17,11 @@ import {
   closeDisplayedAccountNotifications,
   getActivePushEndpoint,
 } from "@/lib/push-client";
+import {
+  addDaysYYYYMMDD,
+  formatDateYYYYMMDDInTz,
+  resolveBusinessTimeZone,
+} from "@/lib/timezone";
 import type { BootstrapPayload } from "@/lib/bootstrap";
 
 interface AdminPortalClientProps {
@@ -39,23 +44,45 @@ export function AdminPortalClient({
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const inFlightRef = useRef<Promise<void> | null>(null);
+  const pendingReloadRef = useRef<boolean>(false);
+  const timezoneRef = useRef(resolveBusinessTimeZone(initialData?.settings?.timezone));
+  useEffect(() => {
+    timezoneRef.current = resolveBusinessTimeZone(data?.settings?.timezone);
+  }, [data?.settings?.timezone]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { force?: boolean }) => {
     if (inFlightRef.current) {
+      if (opts?.force) {
+        pendingReloadRef.current = true;
+      }
       return inFlightRef.current;
     }
     const task = (async () => {
       try {
-        const res = await fetch("/api/bootstrap", { cache: "no-store" });
-        if (!res.ok) {
-          console.error("Bootstrap HTTP status:", res.status);
-        }
-        const json = await res.json().catch(() => null);
-        if (json) {
-          setData(json);
-        }
-      } catch (e) {
-        console.error("Error loading bootstrap data:", e);
+        do {
+          pendingReloadRef.current = false;
+          try {
+            const todayStr = formatDateYYYYMMDDInTz(
+              new Date(),
+              timezoneRef.current
+            );
+            const fromStr = addDaysYYYYMMDD(todayStr, -30);
+            const toStr = addDaysYYYYMMDD(todayStr, 90);
+            const res = await fetch(
+              `/api/bootstrap?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&usersLimit=200`,
+              { cache: "no-store" }
+            );
+            if (!res.ok) {
+              console.error("Bootstrap HTTP status:", res.status);
+            }
+            const json = await res.json().catch(() => null);
+            if (json) {
+              setData(json);
+            }
+          } catch (e) {
+            console.error("Error loading bootstrap data:", e);
+          }
+        } while (pendingReloadRef.current);
       } finally {
         setLoading(false);
         inFlightRef.current = null;
@@ -372,7 +399,12 @@ export function AdminPortalClient({
       </header>
 
       <main className="flex-1 w-full pb-10">
-        <AdminApp initialData={data} onRefresh={loadData} />
+        <AdminApp
+          initialData={data}
+          onRefresh={() => {
+            void loadData({ force: true });
+          }}
+        />
       </main>
     </div>
   );
